@@ -1,0 +1,21 @@
+schema: spec-driven
+context: |
+  HostLens is a Go project providing controlled host diagnostics through MCP.
+  The official Go MCP SDK is the protocol foundation. V1 implements Linux amd64 and arm64 only.
+  Debian, Ubuntu, and Arch are representative test environments, not runtime version gates.
+  Preserve platform boundaries for macOS and Windows. No remediation, model inference,
+  background monitoring, centralized logs, native packages, or OAuth in v1.
+  Current specs/ requirements are authoritative; archived changes preserve design history.
+  Discover active work with openspec list and read its tasks. docs/v1/VALIDATION.md records
+  validation evidence and limitations; planning alone proves neither.
+  Never invent observations or substitute unavailable values.
+  YAML policies combine profiles and direct rules; denial always wins.
+  Keep implementation tasks unchecked until implemented and validated.
+  Read changes/archive/2026-09-10-hostlens-v1/discussion-coverage.md for decision traceability and
+  superseded proposals. Future direction in design.md is not v1 implementation scope.
+rules:
+  specs:
+    - Include observable acceptance scenarios and failure paths for every requirement.
+    - Distinguish unavailable data from failed collection and preserve partial coverage.
+  tasks:
+    - Run all tests in disposable containers by default. A strictly necessary VM requires explicit user confirmation before provisioning, downloading, or starting it. Record container kernel and namespace limits; never test privileged lifecycle on the administrator host.

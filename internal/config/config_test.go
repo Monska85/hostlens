@@ -1,0 +1,47 @@
+package config
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestStrictConfig(t *testing.T) {
+	for _, s := range []string{"server:\n  unknown: true\n", "allow:\n  windows_events: []\n", "version: 1\n---\nversion: 1\n", "version: 1\nversion: 2\n"} {
+		c := DefaultsLinux(false)
+		if e := Decode([]byte(s), &c); e == nil {
+			t.Fatalf("accepted %s", s)
+		}
+	}
+	c := DefaultsLinux(false)
+	if e := Decode([]byte("limits:\n  tool_timeout: 12s\n"), &c); e != nil || c.Limits.ToolTimeout != 12*time.Second {
+		t.Fatal(e)
+	}
+	c.Remediation.Enabled = true
+	if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "remediation") {
+		t.Fatal(e)
+	}
+}
+func TestNetworkAndLimits(t *testing.T) {
+	for _, bind := range [][]string{{"0.0.0.0"}, {"127.0.0.1", "127.0.0.1"}, {"::ffff:127.0.0.1"}, {"bad"}} {
+		c := DefaultsLinux(false)
+		c.Server.Bind = bind
+		if e := ValidateLinux(c); e == nil {
+			t.Errorf("accepted %v", bind)
+		}
+	}
+	c := DefaultsLinux(false)
+	c.Server.AllowInsecureHTTP = true
+	c.Server.Bind = []string{"0.0.0.0", "127.0.0.1"}
+	if ValidateLinux(c) == nil {
+		t.Fatal("overlap accepted")
+	}
+	c.Server.Bind = []string{"0.0.0.0", "::"}
+	if e := ValidateLinux(c); e != nil {
+		t.Fatal(e)
+	}
+	c.Health.Sample = c.Limits.ToolTimeout
+	if ValidateLinux(c) == nil {
+		t.Fatal("unbounded sample")
+	}
+}

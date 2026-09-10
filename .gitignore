@@ -1,0 +1,29 @@
+/dist/
+/bin/
+/coverage/
+*.test
+*.out
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated local agent integrations; project instructions remain versioned.
+/.codex/
+/.agents/skills/
+
+# Local validation artifacts and interpreter caches.
+/candidate.tar.gz
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and operating-system state.
+/.idea/
+/.vscode/
+.DS_Store
+*~
+# Local development dependencies and caches.
+/.tools/
+/.ruff_cache/

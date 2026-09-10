@@ -1,0 +1,7 @@
+profiles: []
+allow:
+  files: [/**]
+  journal: []
+deny:
+  files: []
+  journal: []

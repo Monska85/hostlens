@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Go and static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck python3-venv
+          make deps
+      - name: Prepare validation image
+        run: make test-image
+      - name: Dependency vulnerability scan
+        run: make scan-vulnerabilities
+      - name: Shared local and CI checks
+        run: |
+          make fmt-check lint coverage
+          printf '%s\n' 'PASS: source and container checks'
+      - name: Retain Go coverage reports
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: go-coverage
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Build candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.metadata.outputs.matrix }}
+      version: ${{ steps.metadata.outputs.version }}
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.1
+          install-only: true
+      - name: Validate packaging configuration
+        run: make release-check
+      - name: Select candidate and shared matrix
+        id: metadata
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=0.1.0-dev
+          if [ "${REF_TYPE}" = tag ]; then
+            version=$(python3 -B tools/release/prepare.py version -- "${REF_NAME#v}")
+          fi
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+          printf 'HOSTLENS_VERSION=%s\n' "${version}" >> "${GITHUB_ENV}"
+          printf 'matrix=%s\n' "$(python3 -B tools/test-matrix/main.py --json)" >> "${GITHUB_OUTPUT}"
+      - name: Build candidate once
+        run: |
+          printf 'Building candidate %s for linux/amd64 and linux/arm64\n' "${HOSTLENS_VERSION}"
+          go mod download
+          make package
+          (cd dist/archives && sha256sum --check --strict checksums.txt)
+          printf '%s\n' 'PASS: candidate ready for archive and runtime acceptance'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tested-candidate
+          path: dist/archives/
+          if-no-files-found: error
+          retention-days: 7
+
+  matrix:
+    name: Container / ${{ matrix.target }}
+    needs: build
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}
+    env:
+      HOSTLENS_VERSION: ${{ needs.build.outputs.version }}
+      CASE_TARGET: ${{ matrix.target }}
+      CASE_IMAGE: ${{ matrix.image }}
+      CASE_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tested-candidate
+          path: dist/archives
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare acceptance helper dependencies
+        run: go mod download
+      - name: Prepare platform image
+        if: matrix.kind == 'platform'
+        run: |
+          test "$(scripts/container-arch.sh)" = "${CASE_ARCH}"
+          docker pull --platform "linux/${CASE_ARCH}" "${CASE_IMAGE}"
+      - name: Prepare systemd image
+        if: matrix.kind == 'systemd'
+        run: docker build -t "${CASE_IMAGE}" -f packaging/tests/Dockerfile .
+      - name: Run selected container case
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: python3 -B tools/test-matrix/main.py "${CASE_TARGET}"
+
+  gate:
+    name: CI gate
+    needs: [checks, build, matrix]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every check and container case
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          MATRIX_RESULT: ${{ needs.matrix.result }}
+        run: |
+          printf 'CI gate: checks=%s build=%s matrix=%s\n' "${CHECKS_RESULT}" "${BUILD_RESULT}" "${MATRIX_RESULT}"
+          test "${CHECKS_RESULT}" = success
+          test "${BUILD_RESULT}" = success
+          test "${MATRIX_RESULT}" = success

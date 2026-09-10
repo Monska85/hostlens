@@ -1,0 +1,9 @@
+**
+!packaging/
+!packaging/tests/
+!packaging/tests/Dockerfile
+!packaging/tests/Dockerfile.checks
+!tools/
+!tools/dev/
+!tools/dev/go.mod
+!tools/dev/go.sum

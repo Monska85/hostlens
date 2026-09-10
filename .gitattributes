@@ -1,0 +1,8 @@
+# Keep source, scripts and release manifests consistent across checkouts.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.gz binary
+*.zip binary

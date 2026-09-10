@@ -1,0 +1,7 @@
+profiles: []
+allow:
+  files: [/etc/nginx/**, /var/log/nginx/*.log]
+  journal: [nginx.service]
+deny:
+  files: [/etc/nginx/private/**]
+  journal: []

@@ -1,0 +1,74 @@
+# GoReleaser OSS builds local and CI archives. CI uploads the tested bytes with gh.
+version: 2
+project_name: hostlens
+dist: dist/archives
+snapshot:
+  version_template: '{{ if index .Env "HOSTLENS_VERSION" }}{{ index .Env "HOSTLENS_VERSION" }}{{ else }}0.1.0-dev{{ end }}'
+env:
+  - CGO_ENABLED=0
+  - GOOS=linux
+  - GOTOOLCHAIN=local
+  - GOPROXY=off
+before:
+  hooks:
+    - python3 -B tools/release/prepare.py version -- {{ .Version }}
+    - python3 -B tools/release/prepare.py clean
+    - env GOARCH=amd64 go build -trimpath -ldflags "-X github.com/Monska85/hostlens/internal/contract.Version={{ .Version }}" -o dist/linux-amd64/ ./cmd/...
+    - env GOARCH=arm64 go build -trimpath -ldflags "-X github.com/Monska85/hostlens/internal/contract.Version={{ .Version }}" -o dist/linux-arm64/ ./cmd/...
+    - python3 -B tools/release/prepare.py manifest -- {{ .Version }}
+builds:
+  - skip: true
+archives:
+  - id: amd64
+    meta: true
+    name_template: hostlens-{{ .Version }}-linux-amd64
+    formats: [tar.gz]
+    files:
+      - src: dist/linux-amd64/hostlens*
+        strip_parent: true
+        info: &executable
+          mode: 0755
+          mtime: '1970-01-01T00:00:00Z'
+          owner: root
+          group: root
+      - src: dist/linux-amd64/{LICENSE,NOTICE.txt,*.json,*.yaml,*.md}
+        strip_parent: true
+        info: &document
+          mode: 0644
+          mtime: '1970-01-01T00:00:00Z'
+          owner: root
+          group: root
+      - src: dist/linux-amd64/profiles/*
+        dst: profiles
+        strip_parent: true
+        info: *document
+      - src: dist/linux-amd64/licenses/*
+        dst: licenses
+        strip_parent: true
+        info: *document
+  - id: arm64
+    meta: true
+    name_template: hostlens-{{ .Version }}-linux-arm64
+    formats: [tar.gz]
+    files:
+      - src: dist/linux-arm64/hostlens*
+        strip_parent: true
+        info: *executable
+      - src: dist/linux-arm64/{LICENSE,NOTICE.txt,*.json,*.yaml,*.md}
+        strip_parent: true
+        info: *document
+      - src: dist/linux-arm64/profiles/*
+        dst: profiles
+        strip_parent: true
+        info: *document
+      - src: dist/linux-arm64/licenses/*
+        dst: licenses
+        strip_parent: true
+        info: *document
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+changelog:
+  disable: true
+release:
+  disable: true

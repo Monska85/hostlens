@@ -1,0 +1,17 @@
+FROM golang:1.27.0-trixie@sha256:df98008ecd2b0ecc9f0a94d1b07e3564a9c92b555369b33d9b5f60d0765b2db7 AS tools
+WORKDIR /tools
+ENV GOTOOLCHAIN=local
+COPY tools/dev/go.mod tools/dev/go.sum ./
+RUN CGO_ENABLED=0 go build -mod=readonly -trimpath -o /out/govulncheck golang.org/x/vuln/cmd/govulncheck
+
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates gcc libc6-dev python3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=tools /usr/local/go /usr/local/go
+COPY --from=tools /out/govulncheck /usr/local/bin/govulncheck
+ENV PATH="/usr/local/go/bin:${PATH}" GOTOOLCHAIN=local
+WORKDIR /source
+# Disposable tests create root-owned lifecycle fixtures; this is not a service image.
+USER 0
+CMD ["go", "version"]

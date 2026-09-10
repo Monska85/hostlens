@@ -1,0 +1,42 @@
+{
+  "include": [
+    {
+      "target": "debian-amd64",
+      "kind": "platform",
+      "image": "debian:stable-slim",
+      "arch": "amd64"
+    },
+    {
+      "target": "ubuntu-amd64",
+      "kind": "platform",
+      "image": "ubuntu:24.04",
+      "arch": "amd64"
+    },
+    {
+      "target": "arch-amd64",
+      "kind": "platform",
+      "image": "archlinux:base",
+      "arch": "amd64"
+    },
+    {
+      "target": "debian-arm64",
+      "kind": "platform",
+      "image": "debian:stable-slim",
+      "arch": "arm64"
+    },
+    {
+      "target": "systemd-restricted",
+      "kind": "systemd",
+      "image": "hostlens-systemd-probe:local",
+      "arch": "native",
+      "mode": "restricted"
+    },
+    {
+      "target": "systemd-standard",
+      "kind": "systemd",
+      "image": "hostlens-systemd-probe:local",
+      "arch": "native",
+      "mode": "standard"
+    }
+  ]
+}
