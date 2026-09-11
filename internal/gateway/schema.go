@@ -7,11 +7,13 @@ func inputSchema(tool string) map[string]any {
 	schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
 	var fields, required []string
 	switch tool {
-	case "read_config":
+	case "read_config", "inspect_path":
 		fields, required = []string{"path"}, []string{"path"}
-	case "get_service_status":
+	case "get_service_status", "inspect_service":
 		fields, required = []string{"unit"}, []string{"unit"}
-	case "list_services", "list_packages":
+	case "get_process_info":
+		fields, required = []string{"pid"}, []string{"pid"}
+	case "list_services", "list_packages", "list_processes", "list_accounts":
 		fields = []string{"offset", "limit"}
 	case "query_logs":
 		fields = []string{"path", "unit", "format", "raw_tail", "since", "until", "priority", "limit"}
@@ -22,6 +24,10 @@ func inputSchema(tool string) map[string]any {
 		switch name {
 		case "path", "unit":
 			field["minLength"] = 1
+		case "pid":
+			field["type"] = "integer"
+			field["minimum"] = 1
+			field["maximum"] = 4194304
 		case "offset", "limit":
 			field["type"] = "integer"
 			field["minimum"] = 0

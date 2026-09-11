@@ -7,6 +7,7 @@ HostLens gives agents controlled access to host diagnostics through the Model Co
 ## What it does
 
 - **Inspect:** OS identity, hardware inventory, resource health, services, and installed packages.
+- **Audit:** Explicitly authorized process, network, account, storage, security, metadata and deployment evidence through generic tools.
 - **Read approved sources:** Bounded UTF-8 configuration files, JSONL logs, raw tails, and selected journal units.
 - **Control access:** Expiring tokens, role checks on each call, profile includes, and global denial precedence.
 - **Operate locally:** Explicit installation, policy reload, token administration, recoverable upgrades, and tracked removal.

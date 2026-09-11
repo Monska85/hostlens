@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"slices"
 	"time"
+
+	"github.com/Monska85/hostlens/internal/contract"
 )
 
 type Record struct {
@@ -48,6 +50,9 @@ func Allows(roles []string, tool string) bool {
 		case "diagnostics":
 			level = 3
 		}
+	}
+	if contract.AuditDomain(tool) != "" {
+		return level >= 3
 	}
 	switch tool {
 	case "get_os_info", "get_inventory", "get_health_snapshot":

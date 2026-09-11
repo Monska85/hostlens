@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +18,32 @@ func main() {
 	endpoint := os.Getenv("HOSTLENS_SMOKE_ENDPOINT")
 	if endpoint == "" {
 		endpoint = "http://127.0.0.1:8080/mcp"
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--tcp-ready" {
+		port, err := strconv.Atoi(os.Args[2])
+		if err != nil || port < 1 || port > 65535 {
+			fmt.Fprintln(os.Stderr, "invalid readiness port")
+			os.Exit(1)
+		}
+		deadline := time.Now().Add(60 * time.Second)
+		for time.Now().Before(deadline) {
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", os.Args[2]), time.Second)
+			if err == nil {
+				conn.Close()
+				fmt.Println("Application listener: ready")
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		fmt.Fprintln(os.Stderr, "application listener readiness timed out")
+		os.Exit(1)
+	}
+	if len(os.Args) == 4 && os.Args[1] == "--audit" {
+		if err := runAudit(endpoint, os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--ready" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -24,11 +24,11 @@ Standard mode grants only `CAP_DAC_READ_SEARCH` to diagnostics through systemd. 
 
 ## Tool contract
 
-| Minimum role  | Tools                                                                    |
-| ------------- | ------------------------------------------------------------------------ |
-| `health`      | `get_os_info`, `get_inventory`, `get_health_snapshot`                    |
-| `inspect`     | Health tools plus `list_services`, `get_service_status`, `list_packages` |
-| `diagnostics` | Inspect tools plus `read_config`, `query_logs`                           |
+| Minimum role  | Tools                                                                             |
+| ------------- | --------------------------------------------------------------------------------- |
+| `health`      | `get_os_info`, `get_inventory`, `get_health_snapshot`                             |
+| `inspect`     | Health tools plus `list_services`, `get_service_status`, `list_packages`          |
+| `diagnostics` | Inspect tools plus `read_config`, `query_logs` and explicitly granted audit tools |
 
 Token expiry, revocation, and role changes apply to subsequent requests and are checked again at tool execution. Discovery is not authorization. Tokens cannot administer the host or change policy.
 
@@ -38,11 +38,19 @@ Service and package lists paginate without claiming snapshot consistency. File c
 
 ## Source policy and budgets
 
-Profiles combine typed file and journal rules with transitive includes. Only referenced profiles activate. Every active denial and mandatory exclusion overrides allows; unlisted sources are denied except narrowly defined built-in observations.
+Profiles combine typed file, journal and audit-domain rules with transitive includes. Only referenced profiles activate. Every active denial and mandatory exclusion overrides allows; unlisted sources are denied except narrowly defined built-in observations.
 
 General reads check requested and descriptor-resolved paths, reject symlinks and special files, and cannot retrieve pseudo-filesystems. Built-in observations permit ordinary OS symlinks within their root but reject denied targets. Multiply linked regular files are rejected so masked secrets cannot escape protection through hard-link aliases.
 
 Gateway admission precedes token reads and MCP setup. Backend admission separately bounds unfinished collection work. Size, entry, time, and concurrency limits apply without silently returning fabricated observations. Kernel-blocked I/O retains its slot until it ends; see [recovery guidance](OPERATIONS.md#diagnostic-formats-and-limits).
+
+## Generic audit evidence
+
+Audit tools expose application-independent process, network, account, storage, maintenance, security-control, service, path and HostLens evidence. Diagnostics role and an explicit audit-domain grant are both required; ordinary file/journal grants do not activate audit domains. Existing source denials and mandatory protected objects remain effective.
+
+Collectors retain the existing OS privilege model and do not execute application commands or SQL. Native filesystem reads share an aggregate per-call inspection budget, including failed oversized reads. Bounded PID enumeration precedes page-specific process collection. Process arguments and environments are omitted; selected service properties exclude secret-bearing execution settings.
+
+See [audit tools and evidence limits](OPERATIONS.md#generic-server-and-application-audits) for the operator contract. The agent supplies application interpretation; returned coverage never certifies overall production readiness.
 
 ## Platform extension points
 

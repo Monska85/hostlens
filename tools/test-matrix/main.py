@@ -35,7 +35,10 @@ def command_for(case):
             case["mode"],
             os.environ.get("HOSTLENS_SYSTEMD_IMAGE", case["image"]),
         ]
-    return [str(ROOT / "scripts/test-platforms.sh"), case["image"], case["arch"]]
+    command = [str(ROOT / "scripts/test-platforms.sh"), case["image"], case["arch"]]
+    if case.get("application"):
+        command.append(case["application"])
+    return command
 
 
 def run_cases(cases, env):

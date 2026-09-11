@@ -38,6 +38,10 @@ docker pull ubuntu:24.04
 docker pull archlinux:base
 make systemd-image
 make test-targets
+docker pull --platform linux/amd64 postgres:17-bookworm
+docker pull --platform linux/amd64 nginx:stable-bookworm
+docker pull --platform linux/amd64 httpd:2.4-bookworm
+docker pull --platform linux/amd64 mysql:8.4
 make test-matrix TARGET=native
 make test-matrix
 ```
@@ -65,6 +69,12 @@ Each case verifies and extracts its archive into fresh disposable storage. It ch
 `HOSTLENS_VERSION` must agree between packaging and validation; unset it for the development version. To inspect an existing candidate, set `HOSTLENS_ARCHIVES` to its directory or pass `--archives` directly to the dispatcher. Acceptance tests those selected bytes; it does not assert that they match current source. Run `make package` first when validating source changes.
 
 Systemd acceptance uses a disposable native-architecture container with private writable cgroups and declared extra capabilities. It tests restricted and standard privilege separately, including install, upgrade, removal, and secret containment. It has no host filesystem mounts or external network. The shared kernel and namespace limits remain material; no VM fallback is automatic.
+
+### Application audit acceptance
+
+The shared matrix includes `audit-postgres`, `audit-nginx`, `audit-apache` and `audit-mysql`. Each uses a maintained official amd64 application image with its non-root application identity, no network, a read-only root filesystem, dropped capabilities, resource limits and temporary writable state. The fixture starts the real server on isolated loopback and audits its process, listener, configuration, log and file metadata through generic MCP calls. Explicit source-denial controls must also pass.
+
+Run one with `make test-matrix TARGET=audit-postgres` or its Just equivalent after preparing images and archives. Application-specific setup exists only in acceptance fixtures; runtime collectors have no application integrations. Database fixtures use disposable unauthenticated local initialization solely inside their network-isolated containers. No host ports, persistent database volumes or database credentials are created.
 
 ## Coverage
 

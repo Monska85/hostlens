@@ -9,16 +9,23 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-const LinuxEvaluator = "linux-no-links-v2"
+const LinuxEvaluator = "linux-no-links-v3"
 
-var unitRE = regexp.MustCompile(`^[A-Za-z0-9_@:.\\-]+\.(service|socket|timer|target|mount|automount|path|slice|scope)$`)
+var unitRE = regexp.MustCompile(`^[A-Za-z0-9_@:.\\-]+\.(service|socket|timer|target|mount|automount|path|slice|scope|device|swap)$`)
 
 func ValidLinuxUnit(s string) bool {
-	return len(s) <= 256 && unitRE.MatchString(s) && !strings.HasPrefix(s, "-")
+	return s == "-.mount" || len(s) <= 256 && unitRE.MatchString(s) && !strings.HasPrefix(s, "-")
 }
 
 func validLinuxPattern(category, s string) bool {
 	if len(s) > 4096 {
+		return false
+	}
+	if category == "audit" {
+		switch s {
+		case "*", "processes", "network", "accounts", "storage", "updates", "security", "services", "hostlens", "paths":
+			return true
+		}
 		return false
 	}
 	if category == "files" {
@@ -57,7 +64,7 @@ func CompileLinux(c config.Config, source string, defs map[string]Definition) (*
 	native := semantics{
 		identity: LinuxEvaluator,
 		categories: func(r config.Rules) map[string][]string {
-			return map[string][]string{"files": r.Files, "journal": r.Journal}
+			return map[string][]string{"files": r.Files, "journal": r.Journal, "audit": r.Audit}
 		},
 		validPattern:  validLinuxPattern,
 		matches:       linuxMatches,

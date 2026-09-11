@@ -62,6 +62,12 @@ The [follow-up acceptance review](../../openspec/changes/archive/2026-09-11-tigh
 
 The [final validation-gap fixes](../../openspec/changes/archive/2026-09-11-close-validation-gaps/review.md) enforce complete checksum lists and bounded status probes. Retained checksum, HTTP readiness and stalled-probe regressions passed, alongside all six acceptance cases. Thirteen Python regressions passed across the full suite and final focused rerun.
 
+## Generic production-audit expansion
+
+On 2026-09-12, ten explicitly authorized audit tools passed the Go race/static/build suite, archive verification and all ten container matrix cases. Application acceptance runs real PostgreSQL, nginx, Apache and MySQL processes and investigates their process identity, listeners, approved configuration/logs and path metadata through generic MCP calls. It also checks meaningful account, mount, kernel-control and HostLens evidence and verifies source denial.
+
+Three sf-peer-review rounds ended with no further findings. The [review record](../../openspec/changes/archive/2026-09-12-expand-production-audit/review.md) contains corrected issues, test assumptions and measured limits. This expansion adds evidence for investigation, not a complete security assessment: active firewall state, pending upgrade candidates, effective sudo/SSH authorization, device health and application-internal conclusions remain explicit gaps.
+
 ## Hosted evidence
 
 Use the [CI workflow](https://github.com/Monska85/hostlens/actions/workflows/ci.yml) to inspect the exact commit being evaluated. A green run for an older revision does not validate later changes. The audit session report records the final pushed commit and its hosted result; this archive does not assert future workflow success or release delivery.

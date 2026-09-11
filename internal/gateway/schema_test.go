@@ -82,7 +82,7 @@ func TestToolArgumentContracts(t *testing.T) {
 		if tool.InputSchema.AdditionalProperties {
 			t.Fatal("unrelated properties accepted", tool.Name)
 		}
-		if strings.HasPrefix(tool.Name, "get_") && tool.Name != "get_service_status" && len(tool.InputSchema.Properties) != 0 {
+		if strings.HasPrefix(tool.Name, "get_") && tool.Name != "get_service_status" && tool.Name != "get_process_info" && len(tool.InputSchema.Properties) != 0 {
 			t.Fatal("observation tool advertises irrelevant arguments", tool.Name)
 		}
 	}
@@ -90,6 +90,12 @@ func TestToolArgumentContracts(t *testing.T) {
 		name, tool, args string
 		accepted         bool
 	}{
+		{"audit process", "get_process_info", `{"pid":1}`, true},
+		{"audit process zero", "get_process_info", `{"pid":0}`, false},
+		{"audit process missing", "get_process_info", `{}`, false},
+		{"audit injection", "get_network_info", `{"command":"id"}`, false},
+		{"audit path missing", "inspect_path", `{}`, false},
+		{"audit service missing", "inspect_service", `{}`, false},
 		{"empty observations", "get_os_info", `{}`, true},
 		{"ignored source", "get_inventory", `{"path":"/etc/example"}`, false},
 		{"ignored pagination", "get_health_snapshot", `{"limit":1}`, false},

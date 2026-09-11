@@ -4,6 +4,7 @@ set -eu
 expiry=$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%SZ')
 
 arch=${1}
+application=${2:-}
 run_binary() (
   if [ "${arch}" != "${HOSTLENS_CONTAINER_ARCH}" ]; then
     if [ "${HOSTLENS_QEMU_PRESERVE_ARGV0:-0}" = 1 ]; then
@@ -34,6 +35,16 @@ socket: /tmp/hostlens/diagnostics.sock
 admin_socket: /tmp/hostlens/admin.sock
 profile_dirs: []
 YAML
+if [ -n "${application}" ]; then
+  printf '%s\n' 'denied fixture content' >/tmp/application-denied.conf
+  cat >>/tmp/hostlens/config.yaml <<'YAML'
+allow:
+  audit: ['*']
+  files: [/tmp/application.conf, /tmp/application.log, /tmp/application-denied.conf]
+deny:
+  files: [/tmp/application-denied.conf]
+YAML
+fi
 cat /etc/os-release
 printf '%s\n' 'HOSTLENS_STAGE: verify versions and configuration'
 for binary in hostlens hostlens-diagnostics; do
@@ -55,8 +66,8 @@ run_binary "/tmp/release/hostlens" serve \
   --config /tmp/hostlens/config.yaml >/tmp/hostlens/gateway.log 2>&1 &
 gateway=${!}
 cleanup() {
-  kill "${gateway}" "${backend}" 2>/dev/null || true
-  wait "${gateway}" "${backend}" 2>/dev/null || true
+  kill "${gateway}" "${backend}" "${application_pid:-}" 2>/dev/null || true
+  wait "${gateway}" "${backend}" "${application_pid:-}" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 deadline=$(($(date +%s) + 30))
@@ -77,8 +88,17 @@ fi
 printf '%s\n' 'HOSTLENS_STAGE: inspect system inventory and packages'
 "/helpers/smoke" /tmp/hostlens/token.json get_os_info "${arch}"
 "/helpers/smoke" /tmp/hostlens/token.json get_inventory "${arch}"
-"/helpers/smoke" /tmp/hostlens/token.json list_packages nonempty
+if [ -z "${application}" ]; then
+  "/helpers/smoke" /tmp/hostlens/token.json list_packages nonempty
+fi
 printf '%s\n' 'HOSTLENS_STAGE: verify backend status'
 run_binary "/tmp/release/hostlens" status \
   --config /tmp/hostlens/config.yaml
+if [ -n "${application}" ]; then
+  printf 'HOSTLENS_STAGE: start %s and investigate through generic MCP tools\n' "${application}"
+  # The mounted fixture is linted independently.
+  # shellcheck source=/dev/null
+  . /application-fixture.sh
+  /helpers/smoke --audit /tmp/hostlens/token.json /tmp/application-fixture.json
+fi
 printf 'platform smoke %s: passed\n' "${arch}"

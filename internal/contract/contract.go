@@ -16,9 +16,35 @@ const (
 	IPCClientTimeout = IPCWriteTimeout + 5*time.Second
 )
 
-var Tools = []string{"get_os_info", "get_inventory", "get_health_snapshot", "list_services", "get_service_status", "list_packages", "query_logs", "read_config"}
+var Tools = []string{"get_os_info", "get_inventory", "get_health_snapshot", "list_services", "get_service_status", "list_packages", "query_logs", "read_config", "list_processes", "get_process_info", "get_network_info", "list_accounts", "get_storage_info", "get_update_info", "get_security_info", "get_hostlens_info", "inspect_service", "inspect_path"}
+
+// AuditDomain returns the explicit policy domain for an audit tool.
+func AuditDomain(tool string) string {
+	switch tool {
+	case "list_processes", "get_process_info":
+		return "processes"
+	case "get_network_info":
+		return "network"
+	case "list_accounts":
+		return "accounts"
+	case "get_storage_info":
+		return "storage"
+	case "get_update_info":
+		return "updates"
+	case "get_security_info":
+		return "security"
+	case "get_hostlens_info":
+		return "hostlens"
+	case "inspect_service":
+		return "services"
+	case "inspect_path":
+		return "paths"
+	}
+	return ""
+}
 
 type Args struct {
+	PID      int    `json:"pid,omitempty"`
 	Path     string `json:"path,omitempty"`
 	Unit     string `json:"unit,omitempty"`
 	Format   string `json:"format,omitempty"`

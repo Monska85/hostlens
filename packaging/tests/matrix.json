@@ -37,6 +37,34 @@
       "image": "hostlens-systemd-probe:local",
       "arch": "native",
       "mode": "standard"
+    },
+    {
+      "target": "audit-postgres",
+      "kind": "platform",
+      "image": "postgres:17-bookworm",
+      "arch": "amd64",
+      "application": "postgres"
+    },
+    {
+      "target": "audit-nginx",
+      "kind": "platform",
+      "image": "nginx:stable-bookworm",
+      "arch": "amd64",
+      "application": "nginx"
+    },
+    {
+      "target": "audit-apache",
+      "kind": "platform",
+      "image": "httpd:2.4-bookworm",
+      "arch": "amd64",
+      "application": "apache"
+    },
+    {
+      "target": "audit-mysql",
+      "kind": "platform",
+      "image": "mysql:8.4",
+      "arch": "amd64",
+      "application": "mysql"
     }
   ]
 }

@@ -2,8 +2,8 @@
 set -eu
 
 repo=$(CDPATH='' cd -- "$(dirname -- "${0}")/.." && pwd)
-if [ "${#}" -ne 2 ]; then
-  printf '%s\n' 'Expected one image and binary architecture.' >&2
+if [ "${#}" -ne 2 ] && [ "${#}" -ne 3 ]; then
+  printf '%s\n' 'Expected image, binary architecture and optional application fixture.' >&2
   exit 2
 fi
 engine_arch=$("${repo}/scripts/container-arch.sh")
@@ -16,6 +16,24 @@ if [ "${engine_arch}" = amd64 ] && [ "${2}" = arm64 ]; then
 fi
 image=${1}
 arch=${2}
+application=${3:-}
+fixture_user=0
+memory=512m
+tmp_size=256m
+if [ -n "${application}" ]; then
+  memory=2g
+  tmp_size=1536m
+  case "${application}" in
+    postgres) fixture_user=postgres ;;
+    nginx) fixture_user=nginx ;;
+    apache) fixture_user=daemon ;;
+    mysql) fixture_user=mysql ;;
+    *)
+      printf '%s\n' 'Unknown application fixture' >&2
+      exit 2
+      ;;
+  esac
+fi
 case "${arch}" in
   amd64 | arm64) ;;
   *) exit 2 ;;
@@ -42,8 +60,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 docker run --rm --pull=never --name "${name}" --platform "linux/${container_arch}" \
-  --network=none --read-only --tmpfs /tmp:exec,size=256m \
-  --memory=512m --cpus=1 --pids-limit=256 \
+  --network=none --read-only --tmpfs "/tmp:exec,size=${tmp_size}" \
+  --memory="${memory}" --cpus=1 --pids-limit=256 --user "${fixture_user}" --entrypoint /bin/sh \
   --cap-drop=ALL --security-opt=no-new-privileges \
   -e "HOSTLENS_VERSION=${version}" \
   -e "HOSTLENS_CONTAINER_ARCH=${container_arch}" \
@@ -51,4 +69,5 @@ docker run --rm --pull=never --name "${name}" --platform "linux/${container_arch
   --mount "type=bind,src=${archives},dst=/archives,readonly" \
   --mount "type=bind,src=${helpers},dst=/helpers,readonly" \
   --mount "type=bind,src=${repo}/scripts/platform-smoke.sh,dst=/smoke.sh,readonly" \
-  "${@}" "${image}" /bin/sh /smoke.sh "${arch}"
+  --mount "type=bind,src=${repo}/scripts/application-fixture.sh,dst=/application-fixture.sh,readonly" \
+  "${@}" "${image}" /smoke.sh "${arch}" "${application}"

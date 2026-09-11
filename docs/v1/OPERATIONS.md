@@ -159,3 +159,55 @@ Configuration input is capped at 1 MiB per file, profile directories at 1,024 en
 ### Ownership checks during uninstall
 
 Uninstall preserves accounts and groups when ownership scanning fails, including when root cannot traverse desktop FUSE mounts such as GVFS or document portals. An ownership-check failure does not prove that unrelated owned files exist. Resolve the inaccessible mount or end the affected user session, then retry uninstall. Do not bypass the check by deleting the account manually on a production host.
+
+## Generic server and application audits
+
+Audit tools require a diagnostics token and explicit `audit` grants. Existing configurations activate none. Profiles can grant selected domains or `*`; every active denial wins. File and journal grants remain independent, and explicit source denials still apply to built-in observations.
+
+```yaml
+allow:
+  audit:
+    [
+      processes,
+      network,
+      accounts,
+      storage,
+      updates,
+      security,
+      services,
+      hostlens,
+      paths,
+    ]
+  files: [/etc/example/app.conf, /var/log/example/app.log]
+  journal: [example.service]
+```
+
+Choose actual application paths and units before activating a profile. Approved configuration and log contents can contain credentials; HostLens does not claim automatic secret redaction for arbitrary application text. Process arguments, environments and unrestricted service properties are not exposed by audit collectors.
+
+| Tool                                 | Evidence                                                                                                                         | Audit domain |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `list_processes`, `get_process_info` | Process identity, native CPU ticks, resident pages, selected credentials, executable path and accessible socket inode references | `processes`  |
+| `get_network_info`                   | Interfaces/counters, addresses, routes, TCP listeners and UDP endpoints                                                          | `network`    |
+| `list_accounts`                      | Local accounts and group membership, without password fields                                                                     | `accounts`   |
+| `get_storage_info`                   | Block devices, mount identity/options and software RAID activation                                                               | `storage`    |
+| `get_update_info`                    | Local repository metadata age and available expiry dates                                                                         | `updates`    |
+| `get_security_info`                  | Selected kernel controls and visible active security modules                                                                     | `security`   |
+| `inspect_service`                    | Selected effective systemd runtime, dependency and hardening properties                                                          | `services`   |
+| `inspect_path`                       | Allowed regular-file or directory metadata, without content or recursive traversal                                               | `paths`      |
+| `get_hostlens_info`                  | Selected effective backend configuration and runtime identity, excluding credentials                                             | `hostlens`   |
+
+`get_process_info` requires a positive `pid`; `inspect_service` requires a concrete `unit`; `inspect_path` requires an absolute clean `path` plus file-source permission. Process/account lists accept `offset` and `limit`. Other audit tools accept no arguments. Process offsets index the enumerated PID list: a page can be empty if its processes disappear or become inaccessible. Continue when `next_offset` exists; pages are not atomic snapshots.
+
+A generic investigation starts with service/process identity, correlates listening sockets and storage, examines privileges and isolation, then reads explicitly approved configuration and logs. The agent interprets the application evidence. No PostgreSQL, MySQL, Apache or nginx integration is needed; HostLens never executes SQL or arbitrary commands.
+
+### Evidence limits
+
+`coverage_complete` describes collector coverage, not a security verdict. Preserve valid partial evidence and report missing observations. `policy_denied`, `permission_denied`, unavailable-source, malformed-source and limit issues identify different causes. Neither an empty list nor an inaccessible source establishes absence of a security problem.
+
+- **OS authority:** Existing restricted mode and standard-mode CAP_DAC_READ_SEARCH are unchanged. Firewall inspection, process descriptor access and device-health interfaces may be unavailable; no additional privileged helper is installed.
+- **Network:** Observations describe the collector network namespace. IPv4 address/interface association, policy-routing rules, additional IPv4 tables and external reachability are not established. Correlate socket inode references only when process visibility permits.
+- **Accounts and configuration:** Local accounts do not establish directory-service users, password lock/expiry, effective sudo access or context-dependent SSH Match behavior. Selected configuration reads can support investigation but are not an evaluated authorization result.
+- **Maintenance:** Cached repository dates do not prove a successful refresh, signature verification, pending upgrade candidates, reboot requirements or a current vulnerability assessment. Native package-manager configuration is not executed to bypass source policy.
+- **Storage and recovery:** Mount aliases are not separate disks. LVM topology, RAID redundancy/recovery, physical health behind virtualization and backup restorability require additional evidence. Application logs may record backups; a recorded success is not a verified restore.
+
+Service dependency identities and unit-file locations remain subject to their source denials. Path metadata rejects symlinks, special files and hard-linked regular files, including protected aliases. Mode bits alone do not establish effective access through parent directories, ACLs or security modules.

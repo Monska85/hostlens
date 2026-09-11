@@ -82,18 +82,25 @@ func (r Commands) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 type Collector struct {
-	Config config.Config
-	Policy *policy.Policy
-	Root   string
-	Runner Runner
+	auditRemaining *int
+	Config         config.Config
+	Policy         *policy.Policy
+	Root           string
+	Runner         Runner
 }
 
 func (c *Collector) file(path string, builtin bool) ([]byte, error) {
+	if c.auditBudgetExhausted() {
+		return nil, errAuditLimit
+	}
 	f, e := openObservation(c.Root, path, c.Policy, builtin)
 	if e != nil {
 		return nil, e
 	}
 	defer f.Close()
+	if c.auditRemaining != nil {
+		return c.readAuditBounded(f)
+	}
 	return ReadBounded(f, c.Config.Limits.InspectionBytes)
 }
 func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
@@ -103,6 +110,9 @@ func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
 	m := map[string]bool{}
 	for _, t := range contract.Tools {
 		m[t] = true
+		if domain := contract.AuditDomain(t); domain != "" {
+			m[t] = c.Policy.Allowed("audit", domain, false)
+		}
 	}
 	_, e := os.Stat(filepath.Join(c.Root, "/run/systemd/system"))
 	if ctx.Err() != nil {
@@ -112,6 +122,7 @@ func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
 	svc := e == nil && commandErr == nil
 	m["list_services"] = svc
 	m["get_service_status"] = svc
+	m["inspect_service"] = svc && m["inspect_service"]
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -133,6 +144,9 @@ func (c *Collector) Collect(ctx context.Context, tool string, a contract.Args) c
 		return r
 	}
 	r := c.result()
+	if domain := contract.AuditDomain(tool); domain != "" {
+		return c.collectAudit(ctx, tool, domain, a, r)
+	}
 	switch tool {
 	case "get_os_info":
 		r.Data = c.osInfo(&r)

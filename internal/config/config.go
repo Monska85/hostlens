@@ -14,6 +14,7 @@ import (
 )
 
 type Rules struct {
+	Audit   []string `yaml:"audit"`
 	Files   []string `yaml:"files"`
 	Journal []string `yaml:"journal"`
 }
