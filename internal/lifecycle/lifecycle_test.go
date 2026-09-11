@@ -262,41 +262,62 @@ func TestContainmentUnits(t *testing.T) {
 }
 
 func TestFailedActivationRestoresBinariesAndMetadata(t *testing.T) {
-	m, source, sys := setup(t)
-	if e := m.Install(context.Background(), source, false); e != nil {
-		t.Fatal(e)
-	}
-	failed := false
-	m.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		joined := strings.Join(args, " ")
-		if name == "systemctl" && strings.HasPrefix(joined, "show --property=ActiveState") {
-			return []byte("active\n"), nil
-		}
-		if name == "systemctl" && strings.HasPrefix(joined, "is-active") {
-			return nil, nil
-		}
-		if name == "systemctl" && joined == "start hostlens-gateway.service" && !failed {
-			failed = true
-			return nil, errors.New("candidate failed activation")
-		}
-		return sys.run(ctx, name, args...)
-	}
-	bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend")}, nil)
-	if e := m.Upgrade(context.Background(), bundle); e == nil {
-		t.Fatal("activation failure hidden")
-	}
-	b, _ := os.ReadFile(m.path("/usr/local/bin/hostlens"))
-	if string(b) != "old executable" {
-		t.Fatal("previous executable not restored")
-	}
-	man, _ := m.Load()
-	if man.State != "installed" {
-		t.Fatal("rollback state not restored")
-	}
-	for _, r := range man.Resources {
-		if r.Path == "/usr/local/bin/hostlens" && r.Hash != digest(b) {
-			t.Fatal("rollback ownership hash not restored")
-		}
+	for _, resetFailure := range []bool{false, true} {
+		t.Run(fmt.Sprint("reset_failure=", resetFailure), func(t *testing.T) {
+			m, source, sys := setup(t)
+			if e := m.Install(context.Background(), source, false); e != nil {
+				t.Fatal(e)
+			}
+			limited := false
+			m.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+				joined := strings.Join(args, " ")
+				if name == "systemctl" {
+					switch {
+					case strings.HasPrefix(joined, "show --property=ActiveState"):
+						if limited {
+							if args[len(args)-1] == "hostlens-gateway.service" {
+								return []byte("failed\n"), nil
+							}
+							return []byte("inactive\n"), nil
+						}
+						return []byte("active\n"), nil
+					case strings.HasPrefix(joined, "is-active"):
+						return nil, nil
+					case joined == "start hostlens-gateway.service":
+						limited = true
+						return nil, errors.New("candidate exhausted service start limit")
+					case joined == "reset-failed hostlens-diagnostics.service":
+						return nil, errors.New("inactive unit was unloaded")
+					case joined == "reset-failed hostlens-gateway.service":
+						if resetFailure {
+							return nil, errors.New("reset rejected")
+						}
+						limited = false
+					case joined == "restart hostlens-gateway.service" && limited:
+						return nil, errors.New("start-limit-hit")
+					}
+				}
+				return sys.run(ctx, name, args...)
+			}
+			bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend")}, nil)
+			err := m.Upgrade(context.Background(), bundle)
+			if err == nil || (resetFailure && !strings.Contains(err.Error(), "reset rejected")) {
+				t.Fatalf("activation or reset failure hidden: %v", err)
+			}
+			b, _ := os.ReadFile(m.path("/usr/local/bin/hostlens"))
+			if string(b) != "old executable" {
+				t.Fatal("previous executable not restored")
+			}
+			man, _ := m.Load()
+			if (man.State == "installed") == resetFailure {
+				t.Fatalf("incorrect rollback state: %s", man.State)
+			}
+			for _, r := range man.Resources {
+				if r.Path == "/usr/local/bin/hostlens" && r.Hash != digest(b) {
+					t.Fatal("rollback ownership hash not restored")
+				}
+			}
+		})
 	}
 }
 

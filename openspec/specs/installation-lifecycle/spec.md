@@ -161,3 +161,31 @@ Installation SHALL reject service groups with zero, malformed, or colliding nume
 
 - **WHEN** a service group lists an unrelated local account
 - **THEN** installation reports the group conflict instead of granting that account access to HostLens state
+
+### Requirement: Ownership verification failures are explicit
+
+Uninstall SHALL distinguish an unsuccessful ownership scan from a scan that discovers unrelated owned files. Either outcome SHALL preserve the affected account or group. A failed scan SHALL NOT be reported as proof of unexpected ownership.
+
+#### Scenario: Inaccessible user filesystem
+
+- **WHEN** root cannot traverse a user FUSE mount during ownership verification
+- **THEN** uninstall reports that the ownership check failed and preserves the identity
+
+#### Scenario: Retry after restoring visibility
+
+- **WHEN** ownership can subsequently be checked and no unrelated owned files remain
+- **THEN** a retry may remove the tracked identity
+
+### Requirement: Rollback survives candidate restart exhaustion
+
+Rollback SHALL permit a bounded restart attempt for restored binaries when a crashing candidate has exhausted the service manager's start-rate limit. It SHALL retain normal service rate limiting outside that recovery attempt and SHALL NOT report successful restoration until readiness succeeds.
+
+#### Scenario: Candidate repeatedly exits
+
+- **WHEN** candidate activation fails after exhausting systemd restart attempts
+- **THEN** rollback restores previous binaries, resets the affected previously active service's failure counter, and verifies its restart
+
+#### Scenario: Failure counter cannot be reset
+
+- **WHEN** the service manager rejects recovery reset
+- **THEN** rollback reports the recovery failure and retains incomplete installation state

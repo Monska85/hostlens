@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -83,5 +84,47 @@ func TestReadiness(t *testing.T) {
 		if (err == nil) != (status == 401) || calls != 1 || time.Since(started) > time.Second {
 			t.Fatalf("status=%d, calls=%d, error=%v", status, calls, err)
 		}
+	}
+}
+
+func TestPackageSmokePagination(t *testing.T) {
+	for _, scenario := range []string{"found", "missing", "repeated", "cancelled"} {
+		t.Run(scenario, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				var request struct {
+					Params struct{ Arguments struct{ Offset int } }
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if request.Params.Arguments.Offset != (calls-1)*200 {
+					t.Error("incorrect page offset")
+				}
+				if calls == 1 || scenario == "repeated" {
+					fmt.Fprint(w, `{"result":{"structuredContent":{"next_offset":200,"data":{"items":[{"name":"aaa","version":"1"}]}}}}`)
+					return
+				}
+				if scenario == "cancelled" {
+					<-r.Context().Done()
+					return
+				}
+				name := "systemd"
+				if scenario == "missing" {
+					name = "zzz"
+				}
+				fmt.Fprintf(w, `{"result":{"structuredContent":{"data":{"items":[{"name":%q,"version":"1"}]}}}}`, name)
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			err := smoke(ctx, server.URL, "test", "list_packages", "systemd", false)
+			server.Close()
+			if (err == nil) != (scenario == "found") || calls != 2 {
+				t.Fatalf("scenario=%s calls=%d err=%v", scenario, calls, err)
+			}
+		})
 	}
 }

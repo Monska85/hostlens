@@ -137,7 +137,6 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 			if seen[mount] {
 				continue
 			}
-			seen[mount] = true
 			skip := false
 			for _, x := range c.Config.Health.ExcludeFilesystems {
 				if mount == x {
@@ -145,12 +144,14 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 				}
 			}
 			switch f[2] {
-			case "proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2", "securityfs", "debugfs", "tracefs", "mqueue", "pstore", "hugetlbfs", "configfs", "fusectl":
+			case "proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2", "securityfs", "debugfs", "tracefs", "mqueue", "pstore", "hugetlbfs", "configfs", "fusectl", "autofs", "binfmt_misc":
 				skip = true
 			}
 			if skip {
 				continue
 			}
+			// An autofs control entry may precede mounted storage at this path.
+			seen[mount] = true
 			if !c.Policy.Allowed("files", mount, true) {
 				r.Issue("policy_denied", mount, "filesystem observation denied")
 				fsOK = false

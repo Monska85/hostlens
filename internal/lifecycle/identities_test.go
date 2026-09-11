@@ -57,3 +57,30 @@ func TestServiceGroupsRecheckedAfterCreation(t *testing.T) {
 		t.Fatal("binary installed before group recheck", err)
 	}
 }
+
+func TestUninstallOwnershipScanFailurePreservesIdentityAndAllowsRetry(t *testing.T) {
+	m, source, sys := setup(t)
+	if err := m.Install(context.Background(), source, false); err != nil {
+		t.Fatal(err)
+	}
+	sys.failed = "find /"
+	err := m.Uninstall(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "ownership check failed") || strings.Contains(err.Error(), "unexpected ownership") {
+		t.Fatalf("scan failure misreported: %v", err)
+	}
+	for _, name := range []string{"hostlens-gateway", "hostlens-diagnostics"} {
+		if _, ok := sys.users[name]; !ok {
+			t.Fatalf("account %s removed without ownership verification", name)
+		}
+		if _, ok := sys.groups[name]; !ok {
+			t.Fatalf("group %s removed without ownership verification", name)
+		}
+	}
+	sys.failed = ""
+	if err := m.Uninstall(context.Background()); err != nil {
+		t.Fatal("retry after restoring filesystem visibility", err)
+	}
+	if len(sys.users) != 0 || len(sys.groups) != 0 {
+		t.Fatal("successful retry retained managed identities")
+	}
+}

@@ -2,6 +2,7 @@ package linux
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,5 +67,35 @@ func TestHealthDecodesNewlineMountPath(t *testing.T) {
 	filesystems, ok := r.Data["filesystems"].([]map[string]any)
 	if !ok || len(filesystems) != 1 || filesystems[0]["mount"] != mount || r.Data["complete"] != true {
 		t.Fatalf("escaped native mount was not observed: %+v", r)
+	}
+}
+
+func TestHealthSkipsControlMountsWithoutHidingStorage(t *testing.T) {
+	for _, missingStorage := range []bool{false, true} {
+		t.Run(fmt.Sprint("missing_storage=", missingStorage), func(t *testing.T) {
+			c, root := fixture(t)
+			c.Root = root
+			c.Config.Health.Required = []string{"filesystem"}
+			c.Runner = &fakeRunner{}
+			fixtureOK(t, os.MkdirAll(filepath.Join(root, "proc/self"), 0755))
+			mounts := "control /nonexistent-hostlens-automount autofs rw 0 0\n" +
+				"control /nonexistent-hostlens-binfmt binfmt_misc rw 0 0\n" +
+				"control " + root + " autofs rw 0 0\n" +
+				"device " + root + " ext4 rw 0 0\n"
+			if missingStorage {
+				mounts += "device " + filepath.Join(root, "missing") + " ext4 rw 0 0\n"
+			}
+			fixtureOK(t, os.WriteFile(filepath.Join(root, "proc/self/mounts"), []byte(mounts), 0644))
+			r := c.Collect(context.Background(), "get_health_snapshot", contract.Args{})
+			filesystems, ok := r.Data["filesystems"].([]map[string]any)
+			if !ok || len(filesystems) != 1 || filesystems[0]["mount"] != root || r.Data["complete"] != !missingStorage {
+				t.Fatalf("incorrect storage coverage: %+v", r)
+			}
+			for _, issue := range r.Issues {
+				if strings.Contains(issue.Source, "nonexistent-hostlens") {
+					t.Fatalf("control mount was accessed: %+v", issue)
+				}
+			}
+		})
 	}
 }

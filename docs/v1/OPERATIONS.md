@@ -26,7 +26,7 @@ Standard mode uses `--privilege standard`. It gives only the diagnostic service 
 
 Review `/etc/hostlens/config.yaml` and installed profiles before starting. Fresh installations include no active file or journal grants. Bundled `nginx` and `allow-all` profiles remain inactive until explicitly referenced. Source denials override every profile and every built-in observation grant.
 
-`config.example.yaml` in the archive (repository: `packaging/config.yaml`) contains the shipped defaults. Additional fields are `profile_dirs`, `token_store`, `socket`, `admin_socket`, `gateway_user`, `diagnostics_user`, and `server.allowed_origins`. System identities are fixed in v1. YAML rejects unknown fields and active remediation settings. System-service policy files and their parents must be root-controlled and not writable by unrelated identities.
+`config.example.yaml` in the archive (repository: `packaging/config.yaml`) is a minimal configuration; omitted fields use built-in defaults. Additional fields include `profile_dirs`, `token_store`, `socket`, `admin_socket`, `gateway_user`, `diagnostics_user`, and `server.allowed_origins`. System identities are fixed in v1. YAML rejects unknown fields and active remediation settings. System-service policy files and their parents must be root-controlled and not writable by unrelated identities.
 
 ## Tokens and roles
 
@@ -110,7 +110,7 @@ Capability discovery and backend configuration preparation each permit one under
 
 Exclude unreliable network/FUSE mounts with `health.exclude_filesystems` and avoid granting reads to stalled filesystems. If all slots remain occupied after client timeouts, restore the failing filesystem first, then restart the backend if needed. A process restart cannot repair kernel I/O that remains uninterruptible.
 
-Health reports severity separately from completeness. Required checks default to memory, swap, filesystem, services, load, and CPU. Usage warning/critical thresholds are 80/95 percent; normalized one-minute load thresholds are 1/2. Filesystem exclusions, required checks, sampling, and thresholds are configurable. Failed-service findings warn at one and become critical at two. CPU affinity and aggregate procfs utilization have different scopes, and load does not prove CPU saturation.
+Health reports severity separately from completeness. Capacity checks skip autofs and binfmt_misc control filesystems; mounted storage remains eligible. Bind mounts and tmpfs reflect the service mount namespace, so several paths can report the same underlying capacity. Required checks default to memory, swap, filesystem, services, load, and CPU. Usage warning/critical thresholds are 80/95 percent; normalized one-minute load thresholds are 1/2. Filesystem exclusions, required checks, sampling, and thresholds are configurable. Failed-service findings warn at one and become critical at two. CPU affinity and aggregate procfs utilization have different scopes, and load does not prove CPU saturation.
 
 ## TLS, proxy trust, and containment
 
@@ -118,9 +118,11 @@ The default listener is `127.0.0.1:8080`. `server.bind` accepts an explicit IPv4
 
 Non-loopback plaintext requires `allow_insecure_http: true`. Protect every network hop carrying bearer credentials, including the backend hop from a remote TLS proxy. Proxies forward `Authorization`; they do not replace token verification.
 
+Configure each server as a separately named MCP connection with its own endpoint and token. Host selection and comparisons belong to the client; connecting several servers does not create a shared policy or grant authority to change them.
+
 No proxies are trusted by default. `trusted_proxies` accepts IPs/CIDRs; only a trusted immediate peer enables right-to-left `X-Forwarded-For` resolution. Invalid or entirely trusted chains fall back to the peer. Origin checks and the SDK's localhost protection remain active. Add exact trusted browser origins using `allowed_origins` when required.
 
-If changing token or TLS-key locations, update the diagnostic unit's `InaccessiblePaths` for those configured sources before restarting. Standard mode refuses startup unless a verified systemd inaccessible mount hides each configured secret. Mount verification handles masked ancestors and checks the inaccessible object identity. Restart TLS to activate replacement certificate or key contents.
+If changing token or TLS-key locations, update the diagnostic unit's `InaccessiblePaths` for those configured sources before restarting. Standard mode refuses startup unless a verified systemd inaccessible mount hides each configured secret. Mount verification handles masked ancestors and checks the inaccessible object identity. Restart TLS to activate replacement certificate or key contents. After correcting repeated startup failures, run `systemctl reset-failed hostlens-gateway.service` before starting it again if systemd reports that start requests repeated too quickly.
 
 The diagnostic unit sets `RestrictSUIDSGID=no` because systemd otherwise disables required `openat2`; the gateway keeps that control. The reader retains `NoNewPrivileges`, read-only filesystem protection, fixed capabilities, protected credential mounts, namespace/device/network restrictions, and syscall filtering. Profiles and read-only mounts do not provide complete protection against a compromised backend.
 
@@ -138,7 +140,7 @@ hostlens uninstall
 hostlens uninstall --apply
 ```
 
-Upgrade verifies every archive member and compatibility before replacement, retains old executables, and restarts only previously active services. Activation checks actual IPC and gateway readiness. Reversible failures restore the previous executables. Changed bundled profiles are saved as `.candidate` files for administrator review; active policy is preserved.
+Upgrade verifies every archive member and compatibility before replacement, retains old executables, and restarts only previously active services. Activation checks actual IPC and gateway readiness. Rollback resets failed services before restarting restored binaries, so a crashing candidate cannot leave recovery blocked by its start-rate limit. Reversible failures restore the previous executables. Changed bundled profiles are saved as `.candidate` files for administrator review; active policy is preserved.
 
 A partial lifecycle operation leaves its manifest for inspection and cleanup. Uncreated units do not block cleanup. Pre-existing and unvisited identities are preserved; an identity whose creation was interrupted before ownership confirmation requires administrator inspection. Cleanup also retains a created user when removing it could implicitly delete a pre-existing same-name private group; resolve that mixed identity state explicitly before retrying. Uninstall removes tracked resources and created identities, preserves unexpected files, and reports incomplete cleanup. After resolving a reported external-file conflict, retry with an executable retained from the original extracted archive if installed binaries were already removed. Shared journals remain under normal system retention. HostLens does not undo untracked ACL or rotation changes by guessing their previous state.
 
@@ -153,3 +155,7 @@ Built-in grants apply only to selected facts, never raw file tools. Explicit den
 - **Packages:** `/var/lib/dpkg/status` or `/var/lib/pacman/local` identifies the package database behind the fixed native query.
 
 Configuration input is capped at 1 MiB per file, profile directories at 1,024 entries, include depth at 64, and resolved provenance at 10,000 rules, with a separate 10,000-visit include traversal ceiling. These parser safety bounds are separate from configurable diagnostic limits.
+
+### Ownership checks during uninstall
+
+Uninstall preserves accounts and groups when ownership scanning fails, including when root cannot traverse desktop FUSE mounts such as GVFS or document portals. An ownership-check failure does not prove that unrelated owned files exist. Resolve the inaccessible mount or end the affected user session, then retry uninstall. Do not bypass the check by deleting the account manually on a production host.

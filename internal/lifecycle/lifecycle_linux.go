@@ -435,7 +435,11 @@ func (m Manager) Uninstall(ctx context.Context) error {
 				continue
 			}
 			b, e := m.command(ctx, "find", "/", "-path", "/proc", "-prune", "-o", "-path", "/sys", "-prune", "-o", "-path", "/dev", "-prune", "-o", "-user", r.Path, "-print", "-quit")
-			if e != nil || len(strings.TrimSpace(string(b))) > 0 {
+			if e != nil {
+				failures = append(failures, fmt.Errorf("ownership check failed for %s; account preserved: %w", r.Path, e))
+				continue
+			}
+			if len(strings.TrimSpace(string(b))) > 0 {
 				failures = append(failures, fmt.Errorf("unexpected ownership for %s; account preserved", r.Path))
 				continue
 			}
@@ -465,7 +469,11 @@ func (m Manager) Uninstall(ctx context.Context) error {
 				continue
 			}
 			b, checkErr := m.command(ctx, "find", "/", "-path", "/proc", "-prune", "-o", "-path", "/sys", "-prune", "-o", "-path", "/dev", "-prune", "-o", "-group", r.Path, "-print", "-quit")
-			if checkErr != nil || len(strings.TrimSpace(string(b))) > 0 {
+			if checkErr != nil {
+				failures = append(failures, fmt.Errorf("ownership check failed for %s; group preserved: %w", r.Path, checkErr))
+				continue
+			}
+			if len(strings.TrimSpace(string(b))) > 0 {
 				failures = append(failures, fmt.Errorf("unexpected ownership for %s; group preserved", r.Path))
 				continue
 			}
@@ -585,6 +593,19 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		}
 		for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service"} {
 			if active[svc] {
+				// A crashing candidate can exhaust systemd's start-rate limit.
+				// Allow one recovery attempt with the restored executable.
+				state, stateErr := m.command(recovery, "systemctl", "show", "--property=ActiveState", "--value", svc)
+				if stateErr != nil {
+					failures = append(failures, stateErr)
+				} else if strings.TrimSpace(string(state)) != "inactive" {
+					// Stopped units may have been unloaded; they have no failure
+					// counter to reset and reset-failed would reject them.
+					_, e = m.command(recovery, "systemctl", "reset-failed", svc)
+					if e != nil {
+						failures = append(failures, e)
+					}
+				}
 				if _, e = m.command(recovery, "systemctl", "restart", svc); e != nil {
 					failures = append(failures, e)
 				} else if e = m.ready(recovery, svc); e != nil {

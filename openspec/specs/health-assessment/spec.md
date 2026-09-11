@@ -61,3 +61,22 @@ Health assessment SHALL evaluate all service observations collected within its i
 
 - **WHEN** one unit is observed failed while another service observation is denied or unavailable
 - **THEN** the failed-unit severity remains visible and coverage is incomplete
+
+### Requirement: Capacity checks exclude automount control filesystems
+
+Filesystem capacity collection SHALL skip autofs and binfmt_misc control entries before accessing their mount paths. Skipping an entry SHALL NOT prevent collection of an actual storage filesystem listed at the same path. Failed observations of non-excluded storage SHALL continue to mark filesystem coverage incomplete.
+
+#### Scenario: Inactive automount
+
+- **WHEN** an autofs control mount appears alongside measurable storage
+- **THEN** collection does not access the control mount or mark storage coverage incomplete because of it
+
+#### Scenario: Mounted automount target
+
+- **WHEN** an autofs entry precedes a storage entry at the same path
+- **THEN** the storage entry is measured
+
+#### Scenario: Missing storage
+
+- **WHEN** an ordinary storage mount cannot be measured
+- **THEN** the failure remains explicit and filesystem coverage is incomplete
