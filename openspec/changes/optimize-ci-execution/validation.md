@@ -1,6 +1,6 @@
 # CI execution evidence
 
-Local implementation validation passed. Review round 2 is clean; hosted candidate validation and timing comparisons are pending. No CI correction round has been consumed.
+Local implementation validation passed. Review round 3 is clean. CI correction round 1 fixed restored compiler-cache ownership; final hosted timing comparisons are pending.
 
 ## Baseline
 
@@ -325,3 +325,21 @@ Durations are seconds from GitHub API timestamps. Zero-second skipped and bookke
 The complete disposable-container race/coverage/vet/build and Python suites passed after review fixes, with 78.2% internal statement coverage. A current govulncheck scan found no vulnerabilities. Both candidate archives passed verification; all ten matrix cases passed, including emulated ARM64 and both native systemd privilege modes. Formatting, Ruff, ShellCheck, actionlint and GoReleaser configuration checks passed. The validation image used Go 1.27.0 on Linux amd64; local containers share the host kernel.
 
 Panel round 1 used CI/CD, security, specification, adversarial, maintainability, performance and idiomatic review perspectives. Two medium findings were verified and fixed: enforce a private compiler-cache parent, and add a regression for the changed platform launcher's cancellation behavior. Round 2 rechecked the fixes and reported no actionable findings. No findings were dismissed.
+
+A disposable source copy added `TestWarmCacheStillFails` after cache warmup. The test executed and reported its deliberate failure; the launcher returned failure. The copy was never committed. A real `audit-mysql` acceptance run was interrupted after its named Docker container started: the dispatcher returned 130 and the container disappeared. Local image preparation also passed through the unchanged Make entry points without hosted credentials.
+
+The final local warm-cache suite reported 78.1% statement coverage (the preceding run reported 78.2%; timing-dependent execution paths vary). All 15 Python regression tests passed, including the new private-cache and platform-cancellation checks.
+
+## Hosted cancellation and isolation
+
+The temporary `ci/isolation-probe` branch invoked the actual reusable CI with `release_validation: true`, without a delivery job. After its second push, ordinary run [34656970693](https://github.com/Monska85/hostlens/actions/runs/34656970693) was cancelled; replacement [34656992934](https://github.com/Monska85/hostlens/actions/runs/34656992934) passed. Both reusable runs, [34656970886](https://github.com/Monska85/hostlens/actions/runs/34656970886) and [34656993433](https://github.com/Monska85/hostlens/actions/runs/34656993433), passed. The unrelated candidate branch's [seed run](https://github.com/Monska85/hostlens/actions/runs/34656837717) and [uncached run](https://github.com/Monska85/hostlens/actions/runs/34656900422) also passed.
+
+This directly exercises ordinary supersession, unrelated-branch independence and reusable release-mode isolation. No release tag or release was published; tag scoping and the separate production caller group were also checked in the reviewed workflow expressions. All successful runs retained native hosted ARM64, both systemd modes and every application case.
+
+The complete local suite also passed with `HOSTLENS_BUILD_CACHE` unset. Caches are optional in both environments.
+
+## CI correction round 1
+
+The predecessor revision `fbb23e6` passed all three uncached samples, but its first [warm run](https://github.com/Monska85/hostlens/actions/runs/34658157957) failed the vulnerability scan. GitHub restored compiler files as the runner UID; the capability-dropped container could not overwrite a Go cache entry. The aggregate gate failed correctly.
+
+The fix normalizes caller-owned cache entry permissions beneath the verified private parent. A regression covers restored restrictive directory/file modes. A host-owned copy of the populated compiler cache then passed the real scanner and complete container coverage suite. Panel round 3 reviewed the permission boundary and implementation and found no actionable issues. Final measurements restart on the corrected revision; predecessor timings are not presented as its performance results.

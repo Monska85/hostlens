@@ -47,6 +47,20 @@ class CompilerCacheTests(unittest.TestCase):
                 )
                 self.assertIn(f"selected={cache}/{identity}\n", result.stdout)
                 self.assertTrue((cache / identity).is_dir())
+            restored = cache / "first" / "bucket"
+            restored.mkdir(mode=0o700)
+            entry = restored / "compiler-output"
+            entry.write_text("restored cache output")
+            entry.chmod(0o600)
+            subprocess.run(
+                command,
+                env=dict(env, HOSTLENS_BUILD_CACHE=str(cache), IMAGE_ID="first"),
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertEqual(restored.stat().st_mode & 0o777, 0o777)
+            self.assertEqual(entry.stat().st_mode & 0o777, 0o666)
             (cache / "linked").symlink_to(root)
             result = subprocess.run(
                 command,

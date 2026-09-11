@@ -28,7 +28,7 @@ make package
 make verify-archives
 ```
 
-The Go test container has no network, a read-only root and source/cache mounts, temporary writable storage, dropped capabilities, and bounded memory/processes. `HOSTLENS_TEST_IMAGE` overrides its image. `make test-image` builds its Linux Go toolchain, Python, race-test compiler, and vulnerability scanner from pinned inputs. No host Go installation or scanner executable is mounted. Matrix invocation compiles temporary acceptance helpers with the host Go toolchain and prepared module cache. Containers execute those helpers and the selected archives; they do not mount Go.
+The Go test container has no network, a read-only root and source/module mounts, temporary writable storage, dropped capabilities, and bounded memory/processes. `HOSTLENS_TEST_IMAGE` overrides its image. `make test-image` builds its Linux Go toolchain, Python, race-test compiler, and vulnerability scanner from pinned inputs. No host Go installation or scanner executable is mounted. Matrix invocation compiles temporary acceptance helpers with the host Go toolchain and prepared module cache. Containers execute those helpers and the selected archives; they do not mount Go.
 
 Prepare the representative environments before full matrix acceptance:
 

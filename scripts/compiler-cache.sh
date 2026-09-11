@@ -20,6 +20,12 @@ if [ -n "${HOSTLENS_BUILD_CACHE:-}" ]; then
     mkdir -p "${compiler_cache}"
     # This dedicated non-secret leaf supports Docker user-namespace remapping.
     chmod 1777 "${compiler_cache}"
+    # Hosted cache restoration changes ownership to the runner. Containers drop
+    # DAC override and may use remapped UIDs, so restored entries need write
+    # access too. The mode-0700 parent keeps this storage private on the host.
+    # Leave container-owned entries alone: local users cannot chmod those.
+    find "${compiler_cache}" -user "$(id -u)" -type d -exec chmod a+rwx {} +
+    find "${compiler_cache}" -user "$(id -u)" -type f -exec chmod a+rw {} +
     printf '%s\n' 'Compiler cache: enabled (validation image scoped)'
   else
     printf '%s\n' 'Compiler cache unavailable; using disposable compilation.' >&2
