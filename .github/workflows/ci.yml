@@ -5,7 +5,26 @@ on:
   push:
     branches: ["**"]
   workflow_dispatch:
+    inputs:
+      disable_cache:
+        description: Run without hosted caches
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      disable_cache:
+        type: boolean
+        default: false
+      release_validation:
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-ci-${{ github.event_name }}-${{ (inputs.release_validation || github.ref_type == 'tag') && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !inputs.release_validation && github.ref_type != 'tag' }}
+
+env:
+  CACHE_TRUST: ${{ (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref_type == 'tag') && 'trusted' || 'branch' }}
 
 permissions:
   contents: read
@@ -24,14 +43,37 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ !inputs.disable_cache }}
       - name: Install validation tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck python3-venv
           make deps
+      - name: Prepare Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Prepare validation image
-        run: make test-image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: packaging/tests/Dockerfile.checks
+          load: true
+          tags: hostlens-checks:local
+          cache-from: ${{ !inputs.disable_cache && format('type=gha,scope=checks-{0}-{1}', runner.arch, env.CACHE_TRUST) || '' }}
+          cache-to: ${{ !inputs.disable_cache && format('type=gha,scope=checks-{0}-{1},mode=max,ignore-error=true', runner.arch, env.CACHE_TRUST) || '' }}
+      - name: Restore container compiler cache
+        if: ${{ !inputs.disable_cache }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/hostlens-go-build
+          key: container-go-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_TRUST }}-${{ hashFiles('go.mod', 'packaging/tests/Dockerfile.checks', 'tools/dev/go.mod', 'tools/dev/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            container-go-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_TRUST }}-${{ hashFiles('go.mod', 'packaging/tests/Dockerfile.checks', 'tools/dev/go.mod', 'tools/dev/go.sum') }}-
+      - name: Select optional compiler cache
+        if: ${{ !inputs.disable_cache }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/hostlens-go-build"
+          chmod 700 "${RUNNER_TEMP}/hostlens-go-build"
+          printf 'HOSTLENS_BUILD_CACHE=%s/hostlens-go-build\n' "${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Dependency vulnerability scan
         run: make scan-vulnerabilities
       - name: Shared local and CI checks
@@ -62,7 +104,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ !inputs.disable_cache }}
       - name: Prepare GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -122,7 +164,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ !inputs.disable_cache }}
       - name: Prepare acceptance helper dependencies
         run: go mod download
       - name: Prepare platform image
@@ -130,9 +172,19 @@ jobs:
         run: |
           test "$(scripts/container-arch.sh)" = "${CASE_ARCH}"
           docker pull --platform "linux/${CASE_ARCH}" "${CASE_IMAGE}"
+      - name: Prepare Buildx
+        if: matrix.kind == 'systemd'
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Prepare systemd image
         if: matrix.kind == 'systemd'
-        run: docker build -t "${CASE_IMAGE}" -f packaging/tests/Dockerfile .
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: packaging/tests/Dockerfile
+          load: true
+          tags: ${{ matrix.image }}
+          cache-from: ${{ !inputs.disable_cache && format('type=gha,scope=systemd-{0}-{1}', runner.arch, env.CACHE_TRUST) || '' }}
+          cache-to: ${{ !inputs.disable_cache && format('type=gha,scope=systemd-{0}-{1},mode=max,ignore-error=true', runner.arch, env.CACHE_TRUST) || '' }}
       - name: Run selected container case
         env:
           TMPDIR: ${{ runner.temp }}

@@ -134,5 +134,59 @@ except KeyboardInterrupt: sys.exit(130)
                         os.kill(int(ready.read_text()), signal.SIGTERM)
 
 
+class PlatformCancellation(unittest.TestCase):
+    def test_platform_launcher_terminates_docker_and_preserves_cancellation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            binary = root / "bin"
+            binary.mkdir()
+            ready, cleaned = root / "ready", root / "cleaned"
+            docker = binary / "docker"
+            docker.write_text("""#!/usr/bin/env python3
+import os,pathlib,signal,sys,time
+root=pathlib.Path(os.environ["FIXTURE_ROOT"])
+if sys.argv[1] == "info":
+ print("linux/x86_64"); sys.exit(0)
+if sys.argv[1] == "rm":
+ (root/"cleaned").write_text(sys.argv[-1])
+ try: os.kill(int((root/"ready").read_text()),signal.SIGTERM)
+ except ProcessLookupError: pass
+ sys.exit(0)
+(root/"ready").write_text(str(os.getpid()))
+time.sleep(30)
+""")
+            docker.chmod(0o755)
+            env = dict(
+                os.environ,
+                PATH=str(binary) + ":" + os.environ["PATH"],
+                FIXTURE_ROOT=str(root),
+                HOSTLENS_HELPERS=str(root),
+            )
+            process = subprocess.Popen(
+                [str(runner.ROOT / "scripts/test-platforms.sh"), "fixture", "amd64"],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "Docker fixture did not start")
+                process.send_signal(signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=3)
+                self.assertEqual(process.returncode, 143, stderr)
+                self.assertTrue(cleaned.read_text().startswith("hostlens-platform-test-"))
+                self.assertNotIn("PASS", stdout)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate()
+                if ready.exists():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.kill(int(ready.read_text()), signal.SIGTERM)
+
+
 if __name__ == "__main__":
     unittest.main()

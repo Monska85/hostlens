@@ -44,6 +44,12 @@ elif [ "${mode}" = archives ]; then
   set -- --mount "type=bind,src=${archives},dst=/archives,readonly" -e "HOSTLENS_VERSION=${version}"
 fi
 
+# shellcheck source=scripts/compiler-cache.sh
+. "${repo}/scripts/compiler-cache.sh"
+if [ -n "${compiler_cache}" ]; then
+  set -- "${@}" --mount "type=bind,src=${compiler_cache},dst=/tmp/go-build"
+fi
+
 docker run --rm --pull=never --cidfile "${work}/container" "${@}" \
   --network=none \
   --read-only \

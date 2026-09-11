@@ -20,6 +20,10 @@ class CoverageLauncher(unittest.TestCase):
                 shutil.copyfile(
                     pathlib.Path(__file__).resolve().parents[2] / script.relative_to(root), script
                 )
+                shutil.copyfile(
+                    pathlib.Path(__file__).resolve().parents[2] / "scripts/compiler-cache.sh",
+                    root / "scripts/compiler-cache.sh",
+                )
                 binary = root / "bin"
                 binary.mkdir()
                 docker = binary / "docker"
@@ -61,6 +65,7 @@ class CoverageLauncher(unittest.TestCase):
                     TMPDIR=str(temporary),
                     FIXTURE_ROOT=str(root),
                     SCENARIO=scenario,
+                    HOSTLENS_BUILD_CACHE="",
                 )
                 process = subprocess.Popen(
                     ["sh", str(script), "coverage"],

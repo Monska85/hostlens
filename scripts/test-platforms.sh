@@ -70,4 +70,5 @@ docker run --rm --pull=never --name "${name}" --platform "linux/${container_arch
   --mount "type=bind,src=${helpers},dst=/helpers,readonly" \
   --mount "type=bind,src=${repo}/scripts/platform-smoke.sh,dst=/smoke.sh,readonly" \
   --mount "type=bind,src=${repo}/scripts/application-fixture.sh,dst=/application-fixture.sh,readonly" \
-  "${@}" "${image}" /smoke.sh "${arch}" "${application}"
+  "${@}" "${image}" /smoke.sh "${arch}" "${application}" &
+wait "$!"

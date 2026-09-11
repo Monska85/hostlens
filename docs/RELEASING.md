@@ -99,6 +99,24 @@ GitHub provides [standard arm64 runners for public and private repositories](htt
 
 A fresh `govulncheck` scan fails on reachable vulnerabilities or scanner errors. Use `make scan-vulnerabilities` locally with network access; the scan executes in a disposable container. Results apply to the vulnerability database at scan time.
 
+### Optional caches and cancellation
+
+Hosted image preparation uses Buildx layer caches separated by image kind, architecture and trust. Container compilation uses a separate cache keyed by validation inputs and actual image identity. Go tests always execute with `-count=1`; selected archives and freshly built acceptance helpers are never restored from compiler caches. PR cache writes cannot populate default-branch or release restore refs.
+
+Manual CI dispatch and reusable callers can set `disable_cache: true` to disable hosted layer, compiler and setup-go caches. Cache misses use normal preparation, and optional layer-export failures do not hide build or test failures. Local `test-image` and `systemd-image` commands require no hosted cache credentials.
+
+Local compiler reuse is optional:
+
+```sh
+mkdir -m 700 /tmp/hostlens-build-cache
+HOSTLENS_BUILD_CACHE=/tmp/hostlens-build-cache make coverage
+HOSTLENS_BUILD_CACHE=/tmp/hostlens-build-cache make scan-vulnerabilities
+```
+
+The parent must already exist, belong to the caller and have mode 0700. Missing or unsafe parents fall back to disposable compilation. Only a dedicated image-scoped leaf is writable in the container; source and module mounts remain read-only. Unset the variable for disposable compilation. Remove the dedicated cache after all users of it finish to reclaim space; it contains no credentials or test verdicts.
+
+New ordinary runs supersede older runs for the same workflow, event and branch/PR. Other branches and release validation use separate groups. Cancellation preserves failure/cancellation status and cleans up the active acceptance container. The matrix remains capped at three concurrent jobs; see the implementation's validation record for measured results.
+
 ## Packaging responsibilities
 
 `make package` and `just package` run the same GoReleaser OSS snapshot command. Snapshot mode creates local artifacts without publishing, including when CI supplies a release-tag version through `HOSTLENS_VERSION`.
