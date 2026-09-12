@@ -152,7 +152,8 @@ if sys.argv[1] == "rm":
  try: os.kill(int((root/"ready").read_text()),signal.SIGTERM)
  except ProcessLookupError: pass
  sys.exit(0)
-(root/"ready").write_text(str(os.getpid()))
+(root/"ready.tmp").write_text(str(os.getpid()))
+(root/"ready.tmp").rename(root/"ready")
 time.sleep(30)
 """)
             docker.chmod(0o755)

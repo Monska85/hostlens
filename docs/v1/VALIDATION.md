@@ -81,3 +81,11 @@ Use the [CI workflow](https://github.com/Monska85/hostlens/actions/workflows/ci.
 - **Delivery:** No draft-release upload or public release is established by local tests. Archives currently have integrity checksums, without publisher signatures or provenance attestations.
 
 Failed required checks block release claims. Record newly executed evidence with its scope rather than replacing an unverified result with an assumption.
+
+## CI cache and cancellation validation
+
+The [CI execution record](../../openspec/changes/archive/2026-09-12-optimize-ci-execution/validation.md) contains three comparable baseline runs and three cold/three warm candidate runs, with revisions, job/step times, queue delays and image identities. Warm validation averaged 228.7 seconds and 10.21 job minutes versus 301.7 seconds and 12.45 job minutes at baseline. The measured revision is `bcfab568f24f9a97a080379a29386ca13d3c3116`; the report identifies the small portability/test-harness follow-up separately.
+
+Every candidate run retained native hosted ARM64, both systemd privilege modes, all four application cases and the tested-archive handoff. A deliberately failing test failed after local compiler-cache warmup. Real local cancellation removed its container; hosted supersession cancelled only the obsolete ordinary run while both reusable release-mode probes and unrelated work passed. No release was published.
+
+One warm-run failure exposed restored cache ownership incompatible with dropped container capabilities. The fixed path passed the scanner and full suite locally and in hosted warm runs. Local coverage was 78.1%, with all 15 Python regressions passing. The portable metadata guard removes a GNU-stat dependency, but native macOS client execution was not tested. Shared-kernel/container limits remain unchanged.

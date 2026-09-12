@@ -5,7 +5,7 @@ compiler_cache=
 if [ -n "${HOSTLENS_BUILD_CACHE:-}" ]; then
   if [ -d "${HOSTLENS_BUILD_CACHE}" ] && [ -w "${HOSTLENS_BUILD_CACHE}" ]; then
     cache_root=$(CDPATH='' cd -- "${HOSTLENS_BUILD_CACHE}" && pwd -P)
-    if [ "$(stat -c '%u:%a' "${cache_root}")" != "$(id -u):700" ]; then
+    if ! python3 -c 'import os, stat, sys; s = os.stat(sys.argv[1]); sys.exit(s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o700)' "${cache_root}"; then
       printf '%s\n' 'Compiler cache parent must be caller-owned with mode 0700; using disposable compilation.' >&2
       return 0
     fi

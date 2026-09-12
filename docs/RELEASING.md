@@ -115,7 +115,7 @@ HOSTLENS_BUILD_CACHE=/tmp/hostlens-build-cache make scan-vulnerabilities
 
 The parent must already exist, belong to the caller and have mode 0700. Missing or unsafe parents fall back to disposable compilation. Only a dedicated image-scoped leaf is writable in the container; source and module mounts remain read-only. Unset the variable for disposable compilation. Remove the dedicated cache after all users of it finish to reclaim space; it contains no credentials or test verdicts.
 
-New ordinary runs supersede older runs for the same workflow, event and branch/PR. Other branches and release validation use separate groups. Cancellation preserves failure/cancellation status and cleans up the active acceptance container. The matrix remains capped at three concurrent jobs; see the implementation's validation record for measured results.
+New ordinary runs supersede older runs for the same workflow, event and branch/PR. Other branches and release validation use separate groups. Cancellation preserves failure/cancellation status and cleans up the active acceptance container. The matrix remains capped at three concurrent jobs; see the [CI execution evidence](../openspec/changes/archive/2026-09-12-optimize-ci-execution/validation.md) for measured results.
 
 ## Packaging responsibilities
 

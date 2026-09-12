@@ -18,6 +18,10 @@ class CompilerCacheTests(unittest.TestCase):
             docker = binary / "docker"
             docker.write_text('#!/bin/sh\nprintf "sha256:%s\\n" "${IMAGE_ID}"\n')
             docker.chmod(0o755)
+            # Developer clients need not provide GNU stat (for example macOS).
+            stat_command = binary / "stat"
+            stat_command.write_text("#!/bin/sh\nexit 99\n")
+            stat_command.chmod(0o755)
             cache = root / "cache"
             cache.mkdir(mode=0o700)
             env = dict(os.environ, PATH=str(binary) + ":" + os.environ["PATH"])
