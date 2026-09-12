@@ -61,7 +61,7 @@ func New(component string) *Registry {
 	return r
 }
 func toolName(name string) string {
-	if slices.Contains(contract.Tools, name) {
+	if _, ok := contract.Tool(name); ok {
 		return name
 	}
 	return "unknown"

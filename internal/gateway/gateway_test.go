@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ type observedCollector struct{}
 
 func (observedCollector) Capabilities(context.Context) map[string]bool {
 	m := map[string]bool{}
-	for _, t := range contract.Tools {
+	for _, t := range contract.ToolNames() {
 		m[t] = true
 	}
 	return m
@@ -148,6 +149,165 @@ func TestMCPAuthorizationAndReload(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestEffectGateRejectsBeforeBackendAccess(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	var backendCalls atomic.Int32
+	c := Coordinator{Active: backend.Snapshot{Config: cfg, Generation: "one"}, HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		backendCalls.Add(1)
+		return nil, errors.New("unexpected backend access")
+	})}}
+	result, err := c.Call(context.Background(), "remembered_remediation", contract.Args{}, "request")
+	if err == nil || !result.Error || result.Issues[0].Code != "operation_denied" || backendCalls.Load() != 0 {
+		t.Fatal("unclassified operation crossed authority boundary", result, err, backendCalls.Load())
+	}
+}
+
+type admissionProbe struct {
+	values      []bool
+	commits     int
+	rollbacks   int
+	prepareFail bool
+	partialFail bool
+	nilResult   bool
+}
+
+func (p *admissionProbe) Prepare(_ context.Context, value bool) (EffectTransition, error) {
+	p.values = append(p.values, value)
+	if p.prepareFail {
+		return nil, errors.New("mutation still active")
+	}
+	if p.partialFail {
+		return admissionTransition{probe: p}, errors.New("drain failed after admission closed")
+	}
+	if p.nilResult {
+		return nil, nil
+	}
+	return admissionTransition{probe: p}, nil
+}
+
+type admissionTransition struct{ probe *admissionProbe }
+
+func (t admissionTransition) Commit()   { t.probe.commits++ }
+func (t admissionTransition) Rollback() { t.probe.rollbacks++ }
+
+func TestKnownRemediationEffectUsesReadOnlyGate(t *testing.T) {
+	remediation := contract.ToolDefinition{Effect: contract.EffectRemediation}
+	if toolAdmitted(remediation, true, true) || !toolAdmitted(remediation, true, false) || toolAdmitted(remediation, false, false) {
+		t.Fatal("known remediation effect bypassed or ignored the read-only gate")
+	}
+}
+
+func TestReloadClosesRemediationBeforeActivationAndRestoresOnFailure(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	cfg.MCP.ReadOnly = false
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := backend.NewSnapshot(cfg, p)
+	candidateConfig := cfg
+	candidateConfig.MCP.ReadOnly = true
+	candidate := backend.NewSnapshot(candidateConfig, p)
+	probe := &admissionProbe{}
+	failActivation := true
+	c := Coordinator{Active: active, Load: func() (backend.Snapshot, error) { return candidate, nil }, Effects: probe, Log: slog.Default()}
+	restart, err := RestartFingerprint(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Restart = restart
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/prepare" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"prepared":true}`))}, nil
+		}
+		if failActivation {
+			return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"active":true}`))}, nil
+	})}
+	if err := c.Reload(context.Background()); err == nil || c.Status().MCPReadOnly || len(probe.values) != 1 || !probe.values[0] || probe.commits != 0 || probe.rollbacks != 1 {
+		t.Fatal("failed activation did not restore admission", err, probe, c.Status())
+	}
+	failActivation = false
+	probe = &admissionProbe{}
+	c.Effects = probe
+	if err := c.Reload(context.Background()); err != nil || !c.Status().MCPReadOnly || len(probe.values) != 1 || !probe.values[0] || probe.commits != 1 || probe.rollbacks != 0 {
+		t.Fatal("read-only transition was not atomic", err, probe, c.Status())
+	}
+	candidate = active
+	probe = &admissionProbe{}
+	c.Effects = probe
+	if err := c.Reload(context.Background()); err != nil || c.Status().MCPReadOnly || len(probe.values) != 1 || probe.values[0] || probe.commits != 1 || probe.rollbacks != 0 {
+		t.Fatal("writable eligibility transition was not atomic", err, probe, c.Status())
+	}
+}
+
+func TestReloadRejectsWhenRemediationCannotDrain(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	cfg.MCP.ReadOnly = false
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := backend.NewSnapshot(cfg, p)
+	candidateConfig := cfg
+	candidateConfig.MCP.ReadOnly = true
+	candidate := backend.NewSnapshot(candidateConfig, p)
+	probe := &admissionProbe{prepareFail: true}
+	var backendCalls atomic.Int32
+	restart, _ := RestartFingerprint(active)
+	c := Coordinator{Active: active, Load: func() (backend.Snapshot, error) { return candidate, nil }, Effects: probe, Restart: restart, HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		backendCalls.Add(1)
+		return nil, errors.New("unexpected backend call")
+	})}}
+	if err := c.Reload(context.Background()); err == nil || c.Status().MCPReadOnly || backendCalls.Load() != 0 {
+		t.Fatal("undrained remediation activated candidate", err, c.Status(), backendCalls.Load())
+	}
+}
+
+func TestReloadRollsBackPartiallyPreparedAdmission(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := backend.NewSnapshot(cfg, p)
+	candidateConfig := cfg
+	candidateConfig.MCP.ReadOnly = false
+	candidate := backend.NewSnapshot(candidateConfig, p)
+	probe := &admissionProbe{partialFail: true}
+	restart, _ := RestartFingerprint(active)
+	var backendCalls atomic.Int32
+	c := Coordinator{Active: active, Load: func() (backend.Snapshot, error) { return candidate, nil }, Effects: probe, Restart: restart, HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		backendCalls.Add(1)
+		return nil, errors.New("unexpected backend call")
+	})}}
+	if err := c.Reload(context.Background()); err == nil || backendCalls.Load() != 0 || probe.rollbacks != 1 || probe.commits != 0 || !c.Status().MCPReadOnly {
+		t.Fatal("partial admission preparation was not rolled back", err, backendCalls.Load(), probe, c.Status())
+	}
+}
+
+func TestReloadRejectsMissingAdmissionTransition(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := backend.NewSnapshot(cfg, p)
+	candidateConfig := cfg
+	candidateConfig.MCP.ReadOnly = false
+	candidate := backend.NewSnapshot(candidateConfig, p)
+	restart, _ := RestartFingerprint(active)
+	var backendCalls atomic.Int32
+	c := Coordinator{Active: active, Load: func() (backend.Snapshot, error) { return candidate, nil }, Effects: &admissionProbe{nilResult: true}, Restart: restart, HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		backendCalls.Add(1)
+		return nil, errors.New("unexpected backend call")
+	})}}
+	if err := c.Reload(context.Background()); err == nil || backendCalls.Load() != 0 || !c.Status().MCPReadOnly {
+		t.Fatal("nil admission transition activated candidate", err, backendCalls.Load(), c.Status())
+	}
+}
 
 func TestNativeTLSAndCertificateReload(t *testing.T) {
 	template := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
@@ -502,8 +662,8 @@ func TestReloadDoesNotBlockRequestDeadlineOrStatus(t *testing.T) {
 			}()
 			select {
 			case w := <-done:
-				if !discoveryStalls && !strings.Contains(w.Body.String(), "backend_unavailable") {
-					t.Fatal(w.Body.String())
+				if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "configuration reload in progress") {
+					t.Fatalf("reload admission response: %d %s", w.Code, w.Body.String())
 				}
 			case <-time.After(time.Second):
 				t.Fatal("accepted request blocked behind reload")
@@ -517,5 +677,152 @@ func TestReloadDoesNotBlockRequestDeadlineOrStatus(t *testing.T) {
 				t.Fatal("reload request leaked admission", w.Code)
 			}
 		})
+	}
+}
+
+type blockingRecorder struct {
+	*httptest.ResponseRecorder
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingRecorder) Write(payload []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.entered)
+		<-w.release
+	})
+	return w.ResponseRecorder.Write(payload)
+}
+
+func TestToolDiscoveryHoldsGenerationUntilResponseCompletes(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	cfg.MCP.ReadOnly = false
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := backend.NewSnapshot(cfg, p)
+	candidateConfig := cfg
+	candidateConfig.MCP.ReadOnly = true
+	candidate := backend.NewSnapshot(candidateConfig, p)
+	restart, err := RestartFingerprint(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadEntered := make(chan struct{})
+	c := Coordinator{Active: active, Restart: restart, Load: func() (backend.Snapshot, error) {
+		close(loadEntered)
+		return candidate, nil
+	}, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) {
+		return token.Record{ID: "client", Roles: []string{"diagnostics"}}, nil
+	}), HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"prepared":true,"active":true}`
+		if r.URL.Path == "/status" {
+			body = `{"generation":"` + active.Generation + `","capabilities":{"get_os_info":true}}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	request := diagnosticRequest()
+	request.Body = io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	w := &blockingRecorder{ResponseRecorder: httptest.NewRecorder(), entered: make(chan struct{}), release: make(chan struct{})}
+	handlerDone := make(chan struct{})
+	go func() {
+		c.Handler().ServeHTTP(w, request)
+		close(handlerDone)
+	}()
+	select {
+	case <-w.entered:
+	case <-time.After(time.Second):
+		t.Fatal("tool discovery did not reach response write")
+	}
+	reloadDone := make(chan error, 1)
+	go func() { reloadDone <- c.Reload(context.Background()) }()
+	select {
+	case <-loadEntered:
+		t.Fatal("reload crossed an in-flight discovery response")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(w.release)
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("discovery response did not finish")
+	}
+	select {
+	case err := <-reloadDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reload did not proceed after discovery completed")
+	}
+}
+
+func TestQueuedReloadCannotDeadlockAdmittedToolCall(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := backend.NewSnapshot(cfg, p)
+	restart, err := RestartFingerprint(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusEntered := make(chan struct{})
+	releaseStatus := make(chan struct{})
+	loadEntered := make(chan struct{})
+	var statusOnce sync.Once
+	c := Coordinator{Active: active, Restart: restart, Load: func() (backend.Snapshot, error) {
+		close(loadEntered)
+		return active, nil
+	}, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) {
+		return token.Record{ID: "client", Roles: []string{"health"}}, nil
+	}), HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"prepared":true,"active":true}`
+		if r.URL.Path == "/status" {
+			statusOnce.Do(func() {
+				close(statusEntered)
+				<-releaseStatus
+			})
+			body = `{"generation":"` + active.Generation + `","capabilities":{"get_os_info":true}}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	handlerDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		c.Handler().ServeHTTP(w, diagnosticRequest())
+		handlerDone <- w
+	}()
+	select {
+	case <-statusEntered:
+	case <-time.After(time.Second):
+		t.Fatal("admitted call did not begin capability discovery")
+	}
+	reloadDone := make(chan error, 1)
+	go func() { reloadDone <- c.Reload(context.Background()) }()
+	select {
+	case <-loadEntered:
+		t.Fatal("reload acquired the generation during admitted discovery")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseStatus)
+	select {
+	case response := <-handlerDone:
+		if !strings.Contains(response.Body.String(), "backend_unavailable") {
+			t.Fatal("queued reload did not fail nested admission promptly", response.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("nested read admission deadlocked with queued reload")
+	}
+	select {
+	case err := <-reloadDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reload did not proceed after admitted call returned")
 	}
 }

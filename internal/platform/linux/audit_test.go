@@ -29,7 +29,7 @@ func auditFixture(t *testing.T) (*Collector, string) {
 
 func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 	c, _ := fixture(t)
-	for _, tool := range contract.Tools {
+	for _, tool := range contract.ToolNames() {
 		if contract.AuditDomain(tool) == "" {
 			continue
 		}

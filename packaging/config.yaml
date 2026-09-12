@@ -2,6 +2,9 @@ version: 1
 mode: system
 privilege: standard
 
+mcp:
+  read_only: true
+
 metrics:
   enabled: true
   allow_anonymous: false

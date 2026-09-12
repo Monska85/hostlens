@@ -6,7 +6,7 @@ import (
 )
 
 func TestAuditToolsRequireDiagnosticsRole(t *testing.T) {
-	for _, tool := range contract.Tools {
+	for _, tool := range contract.ToolNames() {
 		if contract.AuditDomain(tool) == "" {
 			continue
 		}

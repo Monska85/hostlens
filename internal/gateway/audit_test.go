@@ -8,8 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Monska85/hostlens/internal/backend"
 	"github.com/Monska85/hostlens/internal/config"
@@ -27,9 +30,10 @@ func (c auditCollector) Collect(context.Context, string, contract.Args) contract
 }
 
 func TestAuditCorrelationAndConfidentiality(t *testing.T) {
-	const credential = "private-bearer-fixture"
 	const payload = "private-content-fixture\n{\"msg\":\"forged-event\"}"
 	cfg := config.DefaultsLinux(false)
+	managed := t.TempDir()
+	cfg.TokenStore = filepath.Join(managed, "tokens.json")
 	cfg.Logging.AuditSuccessfulCalls = true
 	snap := backend.Snapshot{Config: cfg, Generation: "audit"}
 	var backendLogs, gatewayLogs bytes.Buffer
@@ -42,12 +46,12 @@ func TestAuditCorrelationAndConfidentiality(t *testing.T) {
 		r.URL.Host = strings.TrimPrefix(bs.URL, "http://")
 		return http.DefaultTransport.RoundTrip(r)
 	})
-	c := Coordinator{Active: snap, HTTP: client, Log: slog.New(slog.NewJSONHandler(&gatewayLogs, nil)), Tokens: verifyFunc(func(secret string) (token.Record, error) {
-		if secret != credential {
-			t.Errorf("credential changed")
-		}
-		return token.Record{ID: "audit-token", Roles: []string{"diagnostics"}}, nil
-	})}
+	store := token.Store{Path: cfg.TokenStore, AdminUID: os.Geteuid()}
+	row, credential, err := store.Create("audit", []string{"diagnostics"}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Coordinator{Active: snap, HTTP: client, Log: slog.New(slog.NewJSONHandler(&gatewayLogs, nil)), Tokens: store}
 	request := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_config","arguments":{"path":"/private-fixture"}}}`))
 	request.Header.Set("Authorization", "Bearer "+credential)
 	request.Header.Set("Content-Type", "application/json")
@@ -78,11 +82,26 @@ func TestAuditCorrelationAndConfidentiality(t *testing.T) {
 			t.Fatal("gateway and backend request IDs differ")
 		}
 		requestID = id
-		if component == "gateway" && event["token_id"] != "audit-token" {
+		if component == "gateway" && event["token_id"] != row.ID {
 			t.Fatal("missing token identity")
 		}
 		if err := decoder.Decode(&event); err != io.EOF {
 			t.Fatal("unexpected extra or malformed audit event", err)
+		}
+	}
+	entries, err := os.ReadDir(managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		content, err := os.ReadFile(filepath.Join(managed, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, marker := range []string{"private-content-fixture", "forged-event", "/private-fixture"} {
+			if bytes.Contains(content, []byte(marker)) {
+				t.Fatalf("managed file %s retained diagnostic marker", entry.Name())
+			}
 		}
 	}
 }

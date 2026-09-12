@@ -108,7 +108,7 @@ func Main(args []string) error {
 		if sub != "validate" {
 			return errors.New("unknown config command")
 		}
-		fmt.Println("configuration valid; policy " + snap.Policy.Fingerprint())
+		fmt.Println("configuration valid; effective policy " + snap.Fingerprint)
 		return nil
 	case "token":
 		store := token.Store{Path: snap.Config.TokenStore, AdminUID: uid}
@@ -227,7 +227,7 @@ func explain(s backend.Snapshot, configPath, target string, recursive bool, uid 
 			defer resp.Body.Close()
 			if resp.StatusCode == 200 && json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&live) == nil {
 				comparison = "DIFFERENT"
-				if live.Fingerprint == s.Policy.Fingerprint() {
+				if live.Fingerprint == s.Fingerprint {
 					comparison = "MATCH"
 				}
 			}
@@ -268,7 +268,7 @@ func explain(s backend.Snapshot, configPath, target string, recursive bool, uid 
 		defer cancel()
 		truncated, traversalIssues = explainDescendants(ctx, target, s.Config.Limits.ExplainEntries-1, inspect)
 	}
-	return output(map[string]any{"comparison": comparison, "evaluates": "disk policy only; not OS access or complete configuration equality", "config": configPath, "fingerprint": s.Policy.Fingerprint(), "instance": live, "entries": entries, "truncated": truncated, "traversal_issues": traversalIssues})
+	return output(map[string]any{"comparison": comparison, "evaluates": "effective disk policy and MCP read-only setting; not OS access or complete configuration equality", "config": configPath, "fingerprint": s.Fingerprint, "mcp_read_only": s.Config.MCP.ReadOnly, "instance": live, "entries": entries, "truncated": truncated, "traversal_issues": traversalIssues})
 }
 
 func explainDescendants(ctx context.Context, root string, remaining int, inspect func(string)) (bool, []string) {

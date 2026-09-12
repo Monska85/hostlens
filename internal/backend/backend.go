@@ -28,8 +28,11 @@ type Snapshot struct {
 
 // NewSnapshot is shared by both process loaders so generation identity cannot drift.
 func NewSnapshot(c config.Config, p *policy.Policy) Snapshot {
-	fingerprint := p.Fingerprint()
-	b, _ := json.Marshal([]any{c, fingerprint})
+	policyFingerprint := p.Fingerprint()
+	b, _ := json.Marshal([]any{policyFingerprint, c.MCP.ReadOnly})
+	fingerprintHash := sha256.Sum256(b)
+	fingerprint := hex.EncodeToString(fingerprintHash[:])
+	b, _ = json.Marshal([]any{c, fingerprint})
 	h := sha256.Sum256(b)
 	return Snapshot{Config: c, Policy: p, Generation: hex.EncodeToString(h[:]), Fingerprint: fingerprint}
 }
@@ -39,6 +42,7 @@ type Status struct {
 	Generation   string          `json:"generation"`
 	Fingerprint  string          `json:"fingerprint"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
+	MCPReadOnly  bool            `json:"mcp_read_only"`
 }
 type Loader func() (Snapshot, error)
 type Factory func(Snapshot) contract.Collector
@@ -86,7 +90,7 @@ func (s *Server) Status(ctx context.Context) (Status, error) {
 	}
 	flight := s.discovery
 	if flight == nil {
-		flight = &discovery{done: make(chan struct{}), status: Status{Instance: s.Instance, Generation: snap.Generation, Fingerprint: snap.Fingerprint}}
+		flight = &discovery{done: make(chan struct{}), status: Status{Instance: s.Instance, Generation: snap.Generation, Fingerprint: snap.Fingerprint, MCPReadOnly: snap.Config.MCP.ReadOnly}}
 		s.discovery = flight
 		go func() {
 			// Client cancellation must not release capacity while native I/O is stalled.
@@ -239,6 +243,11 @@ func (s *Server) Call(ctx context.Context, req contract.Request) (result contrac
 		s.mu.Unlock()
 		return contract.Failure("generation_mismatch")
 	}
+	definition, known := contract.Tool(req.Tool)
+	if !known || definition.Effect != contract.EffectDiagnostic {
+		s.mu.Unlock()
+		return contract.Failure("unsupported_operation")
+	}
 	if s.running >= snap.Config.Limits.Concurrent {
 		s.mu.Unlock()
 		return contract.Failure("overload")
@@ -281,7 +290,8 @@ func (s *Server) Call(ctx context.Context, req contract.Request) (result contrac
 		if outcome != "success" {
 			level = slog.LevelError
 		}
-		s.Log.Log(ctx, level, "tool_call", "component", "diagnostics", "request_id", req.ID, "tool", req.Tool, "duration_ms", time.Since(started).Milliseconds(), "outcome", outcome)
+		record := contract.AuditRecord{Component: "diagnostics", RequestID: req.ID, Tool: req.Tool, Outcome: outcome, Duration: time.Since(started)}
+		s.Log.Log(ctx, level, "tool_call", record.Attributes()...)
 	}
 	return result
 }

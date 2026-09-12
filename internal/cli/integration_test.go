@@ -135,7 +135,20 @@ func TestSeparateProcessesAndDocumentedCLI(t *testing.T) {
 	if !strings.Contains(result, "observed: 0") {
 		t.Fatalf("real IPC read failed: %s", result)
 	}
-	run("status", "--config", path)
+	status := run("status", "--config", path)
+	if !strings.Contains(string(status), `"mcp_read_only":true`) {
+		t.Fatal("status omitted default read-only state", string(status))
+	}
+	cfg.MCP.ReadOnly = false
+	save()
+	run("reload", "--config", path)
+	status = run("status", "--config", path)
+	if !strings.Contains(string(status), `"mcp_read_only":false`) || !strings.Contains(call("get_os_info", map[string]any{}), `"result"`) {
+		t.Fatal("false eligibility setting changed diagnostic or status behavior", string(status))
+	}
+	cfg.MCP.ReadOnly = true
+	save()
+	run("reload", "--config", path)
 	b = run("policy", "explain", cfg.Allow.Files[0], "--config", path)
 	if !strings.Contains(string(b), "MATCH") {
 		t.Fatal("live policy comparison did not match")

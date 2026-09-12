@@ -87,7 +87,7 @@ func TestLifecycle(t *testing.T) {
 }
 func TestEveryToolRole(t *testing.T) {
 	for i, role := range []string{"health", "inspect", "diagnostics"} {
-		for j, tool := range contract.Tools {
+		for j, tool := range contract.ToolNames() {
 			want := j < 3 || i >= 1 && j < 6 || i == 2
 			if Allows([]string{role}, tool) != want {
 				t.Errorf("%s %s", role, tool)
@@ -210,13 +210,13 @@ func TestMetricsRoleIsIndependent(t *testing.T) {
 	if !RolesOK([]string{"metrics"}) || RolesOK([]string{"admin"}) {
 		t.Fatal("role validation")
 	}
-	for _, tool := range contract.Tools {
+	for _, tool := range contract.ToolNames() {
 		if Allows([]string{"metrics"}, tool) {
 			t.Fatal("metrics grants tool", tool)
 		}
 	}
 	for _, role := range []string{"health", "inspect", "diagnostics"} {
-		for _, tool := range contract.Tools {
+		for _, tool := range contract.ToolNames() {
 			if Allows([]string{role, "metrics"}, tool) != Allows([]string{role}, tool) {
 				t.Fatal("union changed", role, tool)
 			}

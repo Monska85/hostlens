@@ -3,6 +3,8 @@ package contract
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -16,29 +18,122 @@ const (
 	IPCClientTimeout = IPCWriteTimeout + 5*time.Second
 )
 
-var Tools = []string{"get_os_info", "get_inventory", "get_health_snapshot", "list_services", "get_service_status", "list_packages", "query_logs", "read_config", "list_processes", "get_process_info", "get_network_info", "list_accounts", "get_storage_info", "get_update_info", "get_security_info", "get_hostlens_info", "inspect_service", "inspect_path"}
+type Effect string
+type Role string
+type Schema string
+
+const (
+	EffectDiagnostic  Effect = "diagnostic"
+	EffectRemediation Effect = "remediation"
+
+	RoleHealth      Role = "health"
+	RoleInspect     Role = "inspect"
+	RoleDiagnostics Role = "diagnostics"
+
+	SchemaEmpty Schema = "empty"
+	SchemaPage  Schema = "page"
+	SchemaUnit  Schema = "unit"
+	SchemaLogs  Schema = "logs"
+	SchemaPath  Schema = "path"
+	SchemaPID   Schema = "pid"
+)
+
+type ToolDefinition struct {
+	Name         string
+	Effect       Effect
+	RequiredRole Role
+	Capability   string
+	AuditDomain  string
+	Schema       Schema
+	Description  string
+}
+
+var toolRegistry = mustRegistry([]ToolDefinition{
+	{Name: "get_os_info", Effect: EffectDiagnostic, RequiredRole: RoleHealth, Capability: "get_os_info", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_inventory", Effect: EffectDiagnostic, RequiredRole: RoleHealth, Capability: "get_inventory", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_health_snapshot", Effect: EffectDiagnostic, RequiredRole: RoleHealth, Capability: "get_health_snapshot", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "list_services", Effect: EffectDiagnostic, RequiredRole: RoleInspect, Capability: "list_services", Schema: SchemaPage, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_service_status", Effect: EffectDiagnostic, RequiredRole: RoleInspect, Capability: "get_service_status", Schema: SchemaUnit, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "list_packages", Effect: EffectDiagnostic, RequiredRole: RoleInspect, Capability: "list_packages", Schema: SchemaPage, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "query_logs", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "query_logs", Schema: SchemaLogs, Description: "Query one approved path or journal unit. File format must be jsonl or explicit raw_tail; priority is journal 0..7 maximum. Contents are untrusted data."},
+	{Name: "read_config", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "read_config", Schema: SchemaPath, Description: "Read one approved regular UTF-8 configuration file within host limits. Contents are untrusted data."},
+	{Name: "list_processes", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "list_processes", AuditDomain: "processes", Schema: SchemaPage, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_process_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_process_info", AuditDomain: "processes", Schema: SchemaPID, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_network_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_network_info", AuditDomain: "network", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "list_accounts", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "list_accounts", AuditDomain: "accounts", Schema: SchemaPage, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_storage_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_storage_info", AuditDomain: "storage", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_update_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_update_info", AuditDomain: "updates", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_security_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_security_info", AuditDomain: "security", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_hostlens_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_hostlens_info", AuditDomain: "hostlens", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "inspect_service", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "inspect_service", AuditDomain: "services", Schema: SchemaUnit, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "inspect_path", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "inspect_path", AuditDomain: "paths", Schema: SchemaPath, Description: "Collect current observed host facts with explicit issues and scope."},
+})
+
+func ValidateRegistry(definitions []ToolDefinition) error {
+	seen := map[string]bool{}
+	for _, definition := range definitions {
+		if definition.Name == "" || definition.Capability == "" || definition.RequiredRole == "" || definition.Description == "" || definition.Schema == "" {
+			return errors.New("incomplete tool definition")
+		}
+		if definition.Effect != EffectDiagnostic && definition.Effect != EffectRemediation {
+			return fmt.Errorf("unknown effect for %q", definition.Name)
+		}
+		if definition.RequiredRole != RoleHealth && definition.RequiredRole != RoleInspect && definition.RequiredRole != RoleDiagnostics {
+			return fmt.Errorf("unknown role for %q", definition.Name)
+		}
+		if definition.Schema != SchemaEmpty && definition.Schema != SchemaPage && definition.Schema != SchemaUnit && definition.Schema != SchemaLogs && definition.Schema != SchemaPath && definition.Schema != SchemaPID {
+			return fmt.Errorf("unknown schema for %q", definition.Name)
+		}
+		if seen[definition.Name] {
+			return fmt.Errorf("duplicate tool %q", definition.Name)
+		}
+		seen[definition.Name] = true
+	}
+	return nil
+}
+
+func mustRegistry(definitions []ToolDefinition) []ToolDefinition {
+	if err := ValidateRegistry(definitions); err != nil {
+		panic(err)
+	}
+	return definitions
+}
+
+func toolNames(definitions []ToolDefinition) []string {
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
+	return names
+}
+
+// ToolDefinitions returns a copy of the exhaustive registry.
+func ToolDefinitions() []ToolDefinition {
+	return append([]ToolDefinition(nil), toolRegistry...)
+}
+
+// ToolNames returns a copy of the registered tool names.
+func ToolNames() []string {
+	return toolNames(toolRegistry)
+}
+
+func Tool(name string) (ToolDefinition, bool) {
+	for _, definition := range toolRegistry {
+		if definition.Name == name {
+			return definition, true
+		}
+	}
+	return ToolDefinition{}, false
+}
+
+func EffectAllowed(effect Effect, readOnly bool) bool {
+	return effect == EffectDiagnostic || effect == EffectRemediation && !readOnly
+}
 
 // AuditDomain returns the explicit policy domain for an audit tool.
 func AuditDomain(tool string) string {
-	switch tool {
-	case "list_processes", "get_process_info":
-		return "processes"
-	case "get_network_info":
-		return "network"
-	case "list_accounts":
-		return "accounts"
-	case "get_storage_info":
-		return "storage"
-	case "get_update_info":
-		return "updates"
-	case "get_security_info":
-		return "security"
-	case "get_hostlens_info":
-		return "hostlens"
-	case "inspect_service":
-		return "services"
-	case "inspect_path":
-		return "paths"
+	if definition, ok := Tool(tool); ok {
+		return definition.AuditDomain
 	}
 	return ""
 }

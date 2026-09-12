@@ -129,7 +129,7 @@ func (c *Collector) auditHostlens(r *contract.Result) {
 	r.Data["limits"] = map[string]any{"tool_timeout_ms": c.Config.Limits.ToolTimeout.Milliseconds(), "max_concurrent_operations": c.Config.Limits.Concurrent, "max_response_bytes": c.Config.Limits.ResponseBytes, "max_inspection_bytes": c.Config.Limits.InspectionBytes, "max_page_size": c.Config.Limits.PageSize}
 	r.Data["audit_successful_calls"] = c.Config.Logging.AuditSuccessfulCalls
 	domains := map[string]bool{}
-	for _, t := range contract.Tools {
+	for _, t := range contract.ToolNames() {
 		if d := contract.AuditDomain(t); d != "" {
 			domains[d] = c.Policy.Allowed("audit", d, false)
 		}

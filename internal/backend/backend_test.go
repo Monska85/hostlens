@@ -9,9 +9,70 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestSnapshotFingerprintIncludesMCPReadOnly(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := NewSnapshot(cfg, p)
+	cfg.MCP.ReadOnly = false
+	second := NewSnapshot(cfg, p)
+	if first.Fingerprint == second.Fingerprint || first.Generation == second.Generation {
+		t.Fatal("read-only setting missing from active identity")
+	}
+	if first.Fingerprint != NewSnapshot(first.Config, p).Fingerprint {
+		t.Fatal("equivalent settings changed fingerprint")
+	}
+}
+
+type countedCollector struct{ calls *atomic.Int32 }
+
+func (c countedCollector) Capabilities(context.Context) map[string]bool { return nil }
+func (c countedCollector) Collect(context.Context, string, contract.Args) contract.Result {
+	c.calls.Add(1)
+	return contract.Result{}
+}
+
+type liveCollector struct{ value *atomic.Int32 }
+
+func (c liveCollector) Capabilities(context.Context) map[string]bool {
+	return map[string]bool{"get_os_info": true}
+}
+func (c liveCollector) Collect(context.Context, string, contract.Args) contract.Result {
+	return contract.Result{Data: map[string]any{"value": c.value.Load()}}
+}
+
+func TestEveryRequestReadsLiveEvidence(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	var source atomic.Int32
+	s := New(Snapshot{Config: cfg, Generation: "live"}, nil, func(Snapshot) contract.Collector { return liveCollector{&source} }, "backend")
+	for index, definition := range contract.ToolDefinitions() {
+		request := contract.Request{Version: 1, Generation: "live", Tool: definition.Name}
+		first := s.Call(context.Background(), request)
+		want := int32(index + 1)
+		source.Store(want)
+		second := s.Call(context.Background(), request)
+		if first.Data["value"] == second.Data["value"] || second.Data["value"] != want {
+			t.Fatalf("%s retained diagnostic evidence: first=%v second=%v", definition.Name, first, second)
+		}
+	}
+}
+
+func TestBackendRejectsUnknownOperationBeforeCollector(t *testing.T) {
+	cfg := config.DefaultsLinux(false)
+	var calls atomic.Int32
+	s := New(Snapshot{Config: cfg, Generation: "one"}, nil, func(Snapshot) contract.Collector { return countedCollector{&calls} }, "backend")
+	result := s.Call(context.Background(), contract.Request{Version: 1, Generation: "one", Tool: "remediate_host"})
+	if !result.Error || result.Issues[0].Code != "unsupported_operation" || calls.Load() != 0 {
+		t.Fatal("unknown operation crossed collector boundary", result, calls.Load())
+	}
+}
 
 type blockedCollector struct {
 	started chan struct{}

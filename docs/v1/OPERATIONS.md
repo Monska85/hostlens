@@ -28,6 +28,10 @@ Review `/etc/hostlens/config.yaml` and installed profiles before starting. Fresh
 
 `config.example.yaml` in the archive (repository: `packaging/config.yaml`) is a minimal configuration; omitted fields use built-in defaults. Additional fields include `profile_dirs`, `token_store`, `socket`, `admin_socket`, `gateway_user`, `diagnostics_user`, and `server.allowed_origins`. System identities are fixed in v1. YAML rejects unknown fields and active remediation settings. System-service policy files and their parents must be root-controlled and not writable by unrelated identities.
 
+`mcp.read_only` defaults to `true` and is the global ceiling for MCP tool discovery and execution. Setting it to `false` only makes future remediation tools eligible for their separate role, policy, capability, and authority checks. It grants nothing by itself, and v1 still exposes diagnostics only. Local installation, lifecycle, token, status, reload, and telemetry administration do not pass through the MCP gate.
+
+Diagnostics collect live evidence for each request. HostLens does not retain results, inspected content, inventories, history, cleanup candidates, or plans after the admitted collection worker exits. Client timeout or cancellation signals the worker; uninterruptible OS reads remain admission-bounded and visible until they return. HostLens retains only validated configuration and policy, credential metadata, installation ownership and rollback files, bounded request coordination, aggregate service metrics, and payload-free audit metadata. Pagination starts a new live observation rather than reading a server-side snapshot.
+
 ## Tokens and roles
 
 Run token commands as root for system instances, or as the owning user for user instances. Every token requires a name, roles, and an explicit RFC3339 expiry. Creation and rotation print the secret once; protect that output and never paste it into logs or issue reports.
@@ -133,9 +137,11 @@ hostlens reload --system
 systemctl kill --kill-whom=main --signal=HUP hostlens-gateway.service
 ```
 
-Explanation evaluates disk policy and prints `MATCH`, `DIFFERENT`, or `UNKNOWN` against an identified local instance. It shows matching origins, inclusion chains, inactive rules, and resolution status. A match proves policy equivalence only; it does not prove OS readability, full configuration equality, or blanket descendant access.
+Explanation evaluates disk policy plus the active MCP read-only setting and prints `MATCH`, `DIFFERENT`, or `UNKNOWN` against an identified local instance. It shows matching origins, inclusion chains, inactive rules, and resolution status. A match proves effective policy equivalence only; it does not prove OS readability, full configuration equality, or blanket descendant access.
 
-Reload validates the complete candidate in both processes. Listener, TLS material, identity, credential-location, privilege, and connection idle-timeout changes require restart; a mixed reload fails without partially applying the file. If a backend restart cannot restore the gateway's active validated generation from disk, calls remain unavailable until configuration consistency is restored. Status reports fingerprint and generation together.
+Reload validates the complete candidate in both processes. `mcp.read_only` is reloadable. A transition to read-only mode closes future remediation admission before activation; diagnostics already admitted under their generation can finish. Listener, TLS material, identity, credential-location, privilege, and connection idle-timeout changes require restart; a mixed reload fails without partially applying the file. If a backend restart cannot restore the gateway's active validated generation from disk, calls remain unavailable until configuration consistency is restored. Status reports the read-only value, effective fingerprint, and generation together.
+
+Before downgrading to a binary that predates `mcp.read_only`, remove the `mcp` section from configuration with the current binary, validate the result, and downgrade both services together. Older binaries reject the unknown field rather than silently ignoring the safety setting.
 
 This hardening update changes the Linux policy evaluator fingerprint to reflect hard-link rejection. Upgrade and restart both services together; old and new evaluators must not share an active generation.
 
@@ -167,7 +173,7 @@ Explicit `raw_tail: true` returns a bounded physical tail without verified event
 | Inventory page / explanation count                 | 200 / 1,000           |
 | Explanation deadline / CPU sample                  | 2 seconds / 1 second  |
 
-Response ceilings include the SDK's text and structured representations. Gateway admission bounds HTTP work before authentication; excess requests receive HTTP 503. Timeout and cancellation return explicit issues. A blocked OS read retains its backend admission slot until the operation finishes, preventing unbounded abandoned work.
+Response ceilings include the SDK's text and structured representations. Gateway admission bounds HTTP work before authentication; excess requests receive HTTP 503. Timeout and cancellation return explicit issues. A blocked OS read retains its backend admission slot and only its transient request-scoped evidence until the worker finishes; it cannot supply a later request. This prevents unbounded abandoned work without claiming synchronous memory erasure for uninterruptible kernel I/O.
 
 Capability discovery and backend configuration preparation each permit one underlying operation at a time. A stalled operation keeps that capacity occupied after cancellation; further preparation fails promptly and does not replace the active configuration.
 

@@ -40,6 +40,10 @@ func RolesOK(roles []string) bool {
 	return true
 }
 func Allows(roles []string, tool string) bool {
+	definition, ok := contract.Tool(tool)
+	if !ok {
+		return false
+	}
 	level := 0
 	for _, r := range roles {
 		switch r {
@@ -51,15 +55,12 @@ func Allows(roles []string, tool string) bool {
 			level = 3
 		}
 	}
-	if contract.AuditDomain(tool) != "" {
-		return level >= 3
-	}
-	switch tool {
-	case "get_os_info", "get_inventory", "get_health_snapshot":
+	switch definition.RequiredRole {
+	case contract.RoleHealth:
 		return level >= 1
-	case "list_services", "get_service_status", "list_packages":
+	case contract.RoleInspect:
 		return level >= 2
-	case "read_config", "query_logs":
+	case contract.RoleDiagnostics:
 		return level >= 3
 	}
 	return false

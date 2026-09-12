@@ -64,3 +64,27 @@ func TestMetricsDefaultsAndStrictValues(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPReadOnlyDefaultsAndStrictValues(t *testing.T) {
+	for _, input := range []string{"version: 1\n", "mcp: {}\n"} {
+		c := DefaultsLinux(false)
+		if err := Decode([]byte(input), &c); err != nil || !c.MCP.ReadOnly {
+			t.Fatalf("default read-only: %+v %v", c.MCP, err)
+		}
+	}
+	for input, want := range map[string]bool{
+		"mcp:\n  read_only: true\n":  true,
+		"mcp:\n  read_only: false\n": false,
+	} {
+		c := DefaultsLinux(false)
+		if err := Decode([]byte(input), &c); err != nil || c.MCP.ReadOnly != want {
+			t.Fatalf("decoded %q as %+v: %v", input, c.MCP, err)
+		}
+	}
+	for _, input := range []string{"mcp:\n  read_only: maybe\n", "mcp:\n  unknown: true\n"} {
+		c := DefaultsLinux(false)
+		if Decode([]byte(input), &c) == nil {
+			t.Fatalf("accepted %q", input)
+		}
+	}
+}

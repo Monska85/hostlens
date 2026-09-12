@@ -226,7 +226,7 @@ func TestMaximumCatalogSeriesAndSize(t *testing.T) {
 	for _, component := range []string{"gateway", "backend"} {
 		r := New(component)
 		cases := []contract.Result{{}, {Issues: []contract.Issue{{Code: "missing_measurement"}}}, contract.Failure("backend_unavailable"), contract.Failure("unknown"), contract.Failure("timeout"), contract.Failure("cancelled"), contract.Failure("overload"), contract.Failure("policy_denied")}
-		for _, tool := range append(append([]string{}, contract.Tools...), "unknown") {
+		for _, tool := range append(contract.ToolNames(), "unknown") {
 			for _, result := range cases {
 				r.Tool(tool, result, time.Millisecond)
 			}

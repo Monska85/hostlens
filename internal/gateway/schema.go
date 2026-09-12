@@ -1,21 +1,23 @@
 package gateway
 
+import "github.com/Monska85/hostlens/internal/contract"
+
 // inputSchema describes the public tool contract. Args remains the internal IPC
 // representation; unrelated fields must not silently reach collectors.
-func inputSchema(tool string) map[string]any {
+func inputSchema(tool contract.ToolDefinition) map[string]any {
 	properties := map[string]any{}
 	schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
 	var fields, required []string
-	switch tool {
-	case "read_config", "inspect_path":
+	switch tool.Schema {
+	case contract.SchemaPath:
 		fields, required = []string{"path"}, []string{"path"}
-	case "get_service_status", "inspect_service":
+	case contract.SchemaUnit:
 		fields, required = []string{"unit"}, []string{"unit"}
-	case "get_process_info":
+	case contract.SchemaPID:
 		fields, required = []string{"pid"}, []string{"pid"}
-	case "list_services", "list_packages", "list_processes", "list_accounts":
+	case contract.SchemaPage:
 		fields = []string{"offset", "limit"}
-	case "query_logs":
+	case contract.SchemaLogs:
 		fields = []string{"path", "unit", "format", "raw_tail", "since", "until", "priority", "limit"}
 		schema["oneOf"] = []any{map[string]any{"required": []string{"path"}}, map[string]any{"required": []string{"unit"}}}
 	}

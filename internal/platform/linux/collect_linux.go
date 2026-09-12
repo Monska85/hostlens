@@ -108,7 +108,7 @@ func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
 		return nil
 	}
 	m := map[string]bool{}
-	for _, t := range contract.Tools {
+	for _, t := range contract.ToolNames() {
 		m[t] = true
 		if domain := contract.AuditDomain(t); domain != "" {
 			m[t] = c.Policy.Allowed("audit", domain, false)

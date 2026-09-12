@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -30,16 +31,19 @@ func TestToolArgumentContracts(t *testing.T) {
 	cfg := config.DefaultsLinux(false)
 	snap := backend.Snapshot{Config: cfg, Generation: "schema-test"}
 	var calls atomic.Int32
+	var backendRequests atomic.Int32
+	var gatewayLogs bytes.Buffer
 	be := backend.New(snap, nil, func(backend.Snapshot) contract.Collector { return schemaCollector{&calls} }, "backend")
 	bs := httptest.NewServer(be.Handler())
 	defer bs.Close()
 	client := bs.Client()
 	client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		backendRequests.Add(1)
 		r.URL.Scheme = "http"
 		r.URL.Host = strings.TrimPrefix(bs.URL, "http://")
 		return http.DefaultTransport.RoundTrip(r)
 	})
-	c := Coordinator{Active: snap, HTTP: client, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) {
+	c := Coordinator{Active: snap, HTTP: client, Log: slog.New(slog.NewJSONHandler(&gatewayLogs, nil)), Tokens: verifyFunc(func(string) (token.Record, error) {
 		return token.Record{ID: "schema-test", Roles: []string{"diagnostics"}}, nil
 	})}
 	request := func(method string, params any) *httptest.ResponseRecorder {
@@ -75,7 +79,7 @@ func TestToolArgumentContracts(t *testing.T) {
 	if err := json.Unmarshal(listed.Body.Bytes(), &listing); err != nil {
 		t.Fatal(err)
 	}
-	if len(listing.Result.Tools) != len(contract.Tools) {
+	if len(listing.Result.Tools) != len(contract.ToolNames()) {
 		t.Fatal("missing tools", listed.Body.String())
 	}
 	for _, tool := range listing.Result.Tools {
@@ -133,5 +137,16 @@ func TestToolArgumentContracts(t *testing.T) {
 				t.Fatal("invalid arguments reached collector", calls.Load(), expected)
 			}
 		})
+	}
+	before := calls.Load()
+	requestsBefore := backendRequests.Load()
+	const unclassifiedMarker = "remediate_host_sensitive_marker"
+	w := request("tools/call", map[string]any{"name": unclassifiedMarker, "arguments": map[string]any{}})
+	var rejected struct{ Error any }
+	if err := json.Unmarshal(w.Body.Bytes(), &rejected); err != nil || rejected.Error == nil || calls.Load() != before || backendRequests.Load() != requestsBefore {
+		t.Fatal("remembered remediation crossed the effect gate", w.Body.String(), calls.Load(), before, backendRequests.Load(), requestsBefore)
+	}
+	if strings.Contains(gatewayLogs.String(), unclassifiedMarker) {
+		t.Fatal("unclassified tool argument entered audit logs")
 	}
 }

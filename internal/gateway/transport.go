@@ -1,9 +1,12 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -12,12 +15,70 @@ import (
 	"time"
 
 	"github.com/Monska85/hostlens/internal/config"
+	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/token"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type secretKey struct{}
 type peerKey struct{}
 type clientKey struct{}
+
+type mcpEnvelope struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+	} `json:"params"`
+}
+
+func mcpEnvelopes(payload []byte) ([]mcpEnvelope, error) {
+	var messages []mcpEnvelope
+	if len(bytes.TrimSpace(payload)) > 0 && bytes.TrimSpace(payload)[0] == '[' {
+		if err := json.Unmarshal(payload, &messages); err != nil {
+			return nil, err
+		}
+		return messages, nil
+	}
+	var message mcpEnvelope
+	if err := json.Unmarshal(payload, &message); err != nil {
+		return nil, err
+	}
+	return []mcpEnvelope{message}, nil
+}
+
+func deniedToolCall(payload []byte, roles []string, readOnly bool) (mcpEnvelope, bool) {
+	messages, err := mcpEnvelopes(payload)
+	if err != nil {
+		return mcpEnvelope{}, false
+	}
+	for _, message := range messages {
+		if message.Method != "tools/call" {
+			continue
+		}
+		definition, known := contract.Tool(message.Params.Name)
+		if !toolAdmitted(definition, known, readOnly) || !token.Allows(roles, message.Params.Name) {
+			return message, true
+		}
+	}
+	return mcpEnvelope{}, false
+}
+
+func writeToolDenial(w http.ResponseWriter, message mcpEnvelope) {
+	id := message.ID
+	if len(id) == 0 {
+		id = json.RawMessage("null")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    -32600,
+			"message": "authorization denied",
+		},
+	})
+}
 
 func ClientIP(peer, header string, trusted []string) string {
 	a, e := netip.ParseAddr(peer)
@@ -147,11 +208,32 @@ func (c *Coordinator) Handler() http.Handler {
 			http.Error(w, "request too large", 413)
 			return
 		}
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(payload))
+		if !c.operations.TryRLock() {
+			http.Error(w, "configuration reload in progress", http.StatusServiceUnavailable)
+			return
+		}
+		defer c.operations.RUnlock()
+		c.mu.RLock()
+		readOnly := c.Active.Config.MCP.ReadOnly
+		c.mu.RUnlock()
+		if message, denied := deniedToolCall(payload, identity.Roles, readOnly); denied {
+			c.recordToolDenial()
+			c.Log.Error("authorization_denied", "token_id", identity.ID, "tool", auditToolName(message.Params.Name), "request_id", token.Random(12))
+			writeToolDenial(w, message)
+			return
+		}
 		ctx = context.WithValue(responseContext, secretKey{}, secret)
 		ctx = context.WithValue(ctx, peerKey{}, peer)
 		ctx = context.WithValue(ctx, clientKey{}, client)
 		r = r.WithContext(ctx)
-		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return c.MCP(operationContext, identity) }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: int64(cfg.Limits.RequestBytes), PropagateRequestCancellation: true})
+		server := c.MCP(operationContext, identity)
+		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: int64(cfg.Limits.RequestBytes), PropagateRequestCancellation: true})
 		handler.ServeHTTP(w, r)
 	})
 }

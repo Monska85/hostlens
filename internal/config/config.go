@@ -72,7 +72,11 @@ type Metrics struct {
 	Enabled        bool `yaml:"enabled"`
 	AllowAnonymous bool `yaml:"allow_anonymous"`
 }
+type MCP struct {
+	ReadOnly bool `yaml:"read_only"`
+}
 type Config struct {
+	MCP             MCP     `yaml:"mcp"`
 	Metrics         Metrics `yaml:"metrics"`
 	Profile         `yaml:",inline"`
 	Version         int      `yaml:"version"`
@@ -190,6 +194,6 @@ func validate(c Config) error {
 }
 
 func defaults() Config {
-	c := Config{Metrics: Metrics{Enabled: true}, Version: 1, Mode: "user", Privilege: "restricted", Server: Server{Bind: []string{"127.0.0.1"}, Port: 8080, ClientIPHeader: "X-Forwarded-For"}, Limits: Limits{10 * time.Second, 4, 65536, 200, 15 * time.Minute, 24 * time.Hour, 131072, 1048576, 65536, 200, 30 * time.Second, 1000, 2 * time.Second}, Health: Health{Threshold{1, 2}, time.Second, []string{"memory", "swap", "filesystem", "services", "load", "cpu"}, nil, Threshold{80, 95}, Threshold{1, 2}}, Logging: Logging{"info", true}}
+	c := Config{MCP: MCP{ReadOnly: true}, Metrics: Metrics{Enabled: true}, Version: 1, Mode: "user", Privilege: "restricted", Server: Server{Bind: []string{"127.0.0.1"}, Port: 8080, ClientIPHeader: "X-Forwarded-For"}, Limits: Limits{10 * time.Second, 4, 65536, 200, 15 * time.Minute, 24 * time.Hour, 131072, 1048576, 65536, 200, 30 * time.Second, 1000, 2 * time.Second}, Health: Health{Threshold{1, 2}, time.Second, []string{"memory", "swap", "filesystem", "services", "load", "cpu"}, nil, Threshold{80, 95}, Threshold{1, 2}}, Logging: Logging{"info", true}}
 	return c
 }

@@ -6,7 +6,11 @@ HostLens exposes controlled, on-demand host diagnostics to independently authori
 
 V1 supports Linux amd64 and arm64, using capability detection rather than distribution-version gates. Debian, Ubuntu, and Arch are representative environments. Installation uses systemd; missing collection interfaces produce explicit limitations.
 
-Clients own scheduling, notifications, model calls, and retained monitoring history. HostLens performs no remediation, arbitrary shell execution, background monitoring, or automatic updates. macOS, Windows, OAuth, native packages, and separately authorized remediation remain future capabilities.
+Clients own scheduling, notifications, model calls, and retained monitoring history. HostLens performs no remediation, arbitrary shell execution, background monitoring, or automatic updates. Diagnostic evidence belongs only to an admitted collection worker and is not cached or exposed to later requests. A worker blocked in an uninterruptible OS read remains admission-bounded and visible as active work after client timeout until it exits. macOS, Windows, OAuth, native packages, and separately authorized remediation remain future capabilities.
+
+Every MCP tool belongs to one fail-closed effect registry used by discovery and dispatch. `mcp.read_only` defaults to true and blocks remediation-class effects before an external authority boundary. Setting it to false grants nothing without separate role, policy, capability, and mutation authority.
+
+Diagnostic evidence is collection-worker-scoped. Collectors read live sources on every call, and HostLens releases all service-owned references to results, parsed records, inventories, cleanup candidates, and plans when the admitted worker exits. A client timeout cancels the worker but does not pretend an uninterruptible OS read ended synchronously. Configuration, credential metadata, installation ownership, bounded coordination, aggregate metrics, and payload-free audit fields are control-plane state and cannot contain or reconstruct inspected evidence.
 
 ## Components and trust
 
