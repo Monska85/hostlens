@@ -59,6 +59,22 @@ func ClientIP(peer, header string, trusted []string) string {
 }
 func (c *Coordinator) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c.mu.RLock()
+		snapshot := c.Active.Config
+		c.mu.RUnlock()
+		if (r.URL.Path == "/metrics" || r.URL.Path == "/mcp") && snapshot.Metrics.Enabled {
+			route := "mcp"
+			if r.URL.Path == "/metrics" {
+				route = "metrics"
+			}
+			var finish func()
+			w, finish = c.measureHTTP(w, route)
+			defer finish()
+		}
+		if r.URL.Path == "/metrics" {
+			c.scrape(w, r, snapshot)
+			return
+		}
 		if r.URL.Path != "/mcp" {
 			http.NotFound(w, r)
 			return
@@ -66,12 +82,19 @@ func (c *Coordinator) Handler() http.Handler {
 		c.mu.Lock()
 		cfg := c.Active.Config
 		if c.running >= cfg.Limits.Concurrent {
+			if cfg.Metrics.Enabled {
+				c.telemetry().Reject("mcp", "overload")
+			}
 			c.mu.Unlock()
 			http.Error(w, "overload", http.StatusServiceUnavailable)
 			return
 		}
 		c.running++
 		c.mu.Unlock()
+		if cfg.Metrics.Enabled {
+			c.telemetry().StartHTTP("mcp")
+			defer c.telemetry().EndHTTP("mcp")
+		}
 		defer func() { c.mu.Lock(); c.running--; c.mu.Unlock() }()
 		ctx, cancel := context.WithTimeout(r.Context(), cfg.Limits.ToolTimeout)
 		defer cancel()

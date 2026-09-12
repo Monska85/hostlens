@@ -79,6 +79,7 @@ docker exec "${name}" /opt/archive -archive "/opt/hostlens-${version}-linux-${ar
 docker exec "${name}" mv "/opt/hostlens-${version}-linux-${arch}.tar.gz" /opt/candidate.tar.gz
 docker cp "${repo}/scripts/systemd-acceptance.sh" "${name}:/opt/systemd-acceptance.sh"
 if ! docker exec "${name}" /bin/sh /opt/systemd-acceptance.sh "${mode}" "${arch}"; then
+  docker exec "${name}" systemctl show --property=Result --property=ActiveState --property=SubState hostlens-diagnostics.service hostlens-gateway.service
   docker exec "${name}" journalctl --no-pager \
     -u hostlens-gateway.service -u hostlens-diagnostics.service -n 50
   exit 1

@@ -1,6 +1,6 @@
 # Operating HostLens
 
-HostLens is a local implementation candidate for Linux amd64 and arm64. It exposes eight diagnostic tools through bearer-authenticated Streamable HTTP at `/mcp`. It does not execute remediation, schedule monitoring, retain inspected content, or call model providers. See [validation evidence](VALIDATION.md) before deployment; no release has been published.
+HostLens is a local implementation candidate for Linux amd64 and arm64. It exposes diagnostic tools through bearer-authenticated Streamable HTTP at `/mcp` and service telemetry at `/metrics`. It does not execute remediation, schedule monitoring, retain inspected content, or call model providers. See [validation evidence](VALIDATION.md) before deployment; no release has been published.
 
 ## Prerequisites
 
@@ -48,6 +48,7 @@ Choose expiry and overlap dates appropriate to the operation; overlap cannot ext
 | `health`      | `get_os_info`, `get_inventory`, `get_health_snapshot`                    |
 | `inspect`     | Health tools plus `list_services`, `get_service_status`, `list_packages` |
 | `diagnostics` | Inspect tools plus `read_config`, `query_logs`                           |
+| `metrics`     | Scrape `/metrics` only; no diagnostic or administrative authority        |
 
 Use `Authorization: Bearer SECRET` in the MCP client. Multiple independently authenticated clients share one host policy. The gateway uses stateless SDK transport: no retained session identity can preserve revoked authority. MCP tokens never authorize local administrative commands.
 
@@ -57,6 +58,68 @@ Start the services after reviewing policy and creating credentials:
 systemctl start hostlens-diagnostics.service hostlens-gateway.service
 hostlens status --system
 ```
+
+## Service metrics
+
+`GET /metrics` shares every configured HTTP listener and its TLS settings. Existing configurations default to a protected endpoint:
+
+```yaml
+metrics:
+  enabled: true
+  allow_anonymous: false
+```
+
+Both settings support `hostlens reload --system`. A failed reload preserves active settings, and already admitted scrapes may finish with their original access snapshot. Set `enabled: false` to return 404 and stop recording new request/tool observations. Re-enabling resumes existing counters; it does not reset them.
+
+Create a dedicated token, or update an existing token while explicitly preserving its other roles:
+
+```sh
+hostlens token create --system --name prometheus --roles metrics --expires 2030-01-01T00:00:00Z
+hostlens token update --system --id PUBLIC_ID --roles health,metrics
+```
+
+Role updates preserve the bearer secret. No diagnostic role includes metrics, and metrics alone grants no MCP tools or local administration. Expiry, revocation, rotation overlap and role removal take effect on subsequent protected scrapes. Store the one-time secret in a protected scraper credential file. For example, with a mode-0600 curl configuration containing `header = "Authorization: Bearer SECRET"`:
+
+```sh
+curl --config /secure/hostlens-scrape.conf --fail http://127.0.0.1:8080/metrics
+```
+
+Alternatively, explicitly set `allow_anonymous: true` and reload. This exposes service metadata to anyone who can reach **any configured listener**, including through a proxy. Anonymous scraping ignores supplied credentials. MCP continues to require bearer authentication on loopback and behind trusted proxies. Use TLS for remote bearer traffic.
+
+Disabled routes return 404 before authentication; enabled methods other than GET return 405 with `Allow: GET`. Protected GET requests return 401 for missing/invalid/expired/revoked credentials and 403 for valid tokens without metrics. Each gateway admits one scrape before token reads; excess requests return 503 without queuing. MCP uses separate admission. Total collection and writing have a five-second deadline, backend collection has two seconds, and output is limited to 1 MiB. A stalled operation retains its slot until underlying work ends. Gateway collection/encoding failures return non-success, never a successful truncated exposition.
+
+HTTP 200 establishes available gateway telemetry. Alert separately on `hostlens_backend_up`: 0 means backend telemetry failed, timed out or was malformed; backend samples are omitted, never cached or replaced by zero. A value of 1 establishes telemetry reachability only. Diagnostics still enforce generation synchronization and source policy.
+
+### Metric catalog
+
+All names below are fixed. Component metrics have `component="gateway"` or `component="backend"`; `hostlens_backend_up` has no labels. Counters reset with their owning process. Runtime values describe HostLens itself, without host/application polling or diagnostic collection. No labels include credential identities, addresses, hostnames, paths, application names, process IDs, commands, raw errors or inspected content.
+
+| Metric                                   | Type and unit           | Additional labels and meaning                                                                                                                             |
+| ---------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hostlens_http_requests_total`           | Counter, requests       | Gateway only: `route` = `mcp` or `metrics`; `status` = `2xx`, `3xx`, `4xx`, `5xx`. Completed route requests, including rejections.                        |
+| `hostlens_http_request_duration_seconds` | Histogram, seconds      | Gateway only: `route`; elapsed handler time, including authentication and response writing.                                                               |
+| `hostlens_http_requests_active`          | Gauge, requests         | Gateway only: `route`; admitted unfinished work, including stalled scrape authentication/collection.                                                      |
+| `hostlens_http_rejections_total`         | Counter, rejections     | Gateway only: `route`, `reason` = `authentication`, `authorization`, `overload`. Also includes MCP tool authorization failures inside HTTP 200 responses. |
+| `hostlens_tool_calls_total`              | Counter, calls          | `tool`, `outcome`; completed calls observed at each component boundary.                                                                                   |
+| `hostlens_tool_duration_seconds`         | Histogram, seconds      | `tool`; duration until the component returns its call result.                                                                                             |
+| `hostlens_tool_work_active`              | Gauge, operations       | Unfinished component work. Backend retains stalled native collection until it ends.                                                                       |
+| `hostlens_collection_gaps_total`         | Counter, affected calls | `tool`, `reason`; each gap category counted at most once per call.                                                                                        |
+| `hostlens_go_heap_objects_bytes`         | Gauge, bytes            | Memory occupied by live or unswept Go heap objects.                                                                                                       |
+| `hostlens_go_memory_bytes`               | Gauge, bytes            | Total memory mapped by the Go runtime.                                                                                                                    |
+| `hostlens_go_goroutines`                 | Gauge, goroutines       | Current Go goroutines.                                                                                                                                    |
+| `hostlens_go_gc_cycles_total`            | Counter, cycles         | Completed Go garbage collections.                                                                                                                         |
+| `hostlens_process_start_time_seconds`    | Gauge, Unix seconds     | Process telemetry initialization time, near process startup.                                                                                              |
+| `hostlens_process_cpu_seconds_total`     | Counter, CPU seconds    | Linux process user plus system CPU time.                                                                                                                  |
+| `hostlens_process_max_resident_bytes`    | Gauge, bytes            | Linux process lifetime peak resident memory, not current RSS.                                                                                             |
+| `hostlens_backend_up`                    | Gauge, 0 or 1           | Backend telemetry reachability for this scrape.                                                                                                           |
+
+Histograms use upper bounds `0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60` seconds, plus `+Inf`, `_sum` and `_count`. Tool labels are the fixed [diagnostic tool names](SPEC.md#tool-contract) and audit names documented below; arbitrary names map to `unknown`. Outcomes are `success`, `partial`, `unavailable`, `error`, `timeout`, `cancelled`, `overload`, `denied`. Gap reasons group result issue codes into `unavailable`, `denied`, `limit`, `invalid`, `coverage`, or `other`; truncation contributes `limit`.
+
+Gateway and backend call counters are separate boundary observations: do not sum both components to count user calls. Transport/authentication rejection does not invent a tool execution. Backend rejection can occur before collection, and a gateway call may fail before reaching the backend. Tool timeout counters describe the returned result; active backend work may remain nonzero afterward. HTTP counters include only `/mcp` and enabled `/metrics`; a scrape's completed HTTP outcome becomes visible in a later scrape.
+
+The fixed catalog permits at most 1,205 exposed series across both components, including histogram series and all tool/outcome/gap combinations. Unused counter/vector combinations are absent until observed. Unsupported Go measurements and non-Linux native process measurements are omitted. No generic Prometheus default/global collectors, build labels or application exporters are registered.
+
+Before downgrading to a binary without metrics support, use the current CLI to remove `metrics` from all token role sets. For metrics-only tokens, revoke them first, then update their inactive role metadata to `health`; updating roles does not reactivate a revoked token. After cleaning token metadata, remove the `metrics` configuration section, and then downgrade both services together. Older unknown-role/unknown-field checks remain strict.
 
 ## Policy, explanation, and reload
 

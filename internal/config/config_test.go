@@ -45,3 +45,22 @@ func TestNetworkAndLimits(t *testing.T) {
 		t.Fatal("unbounded sample")
 	}
 }
+
+func TestMetricsDefaultsAndStrictValues(t *testing.T) {
+	for _, input := range []string{"version: 1\n", "metrics: {}\n"} {
+		c := DefaultsLinux(false)
+		if err := Decode([]byte(input), &c); err != nil || !c.Metrics.Enabled || c.Metrics.AllowAnonymous {
+			t.Fatalf("defaults: %+v %v", c.Metrics, err)
+		}
+	}
+	c := DefaultsLinux(false)
+	if err := Decode([]byte("metrics:\n  enabled: false\n  allow_anonymous: true\n"), &c); err != nil || c.Metrics.Enabled || !c.Metrics.AllowAnonymous {
+		t.Fatal(c.Metrics, err)
+	}
+	for _, input := range []string{"metrics:\n  enabled: maybe\n", "metrics:\n  allow_anonymous: 1\n", "metrics:\n  unknown: true\n"} {
+		c := DefaultsLinux(false)
+		if Decode([]byte(input), &c) == nil {
+			t.Fatalf("accepted %q", input)
+		}
+	}
+}

@@ -33,7 +33,7 @@ func RolesOK(roles []string) bool {
 		return false
 	}
 	for _, r := range roles {
-		if !slices.Contains([]string{"health", "inspect", "diagnostics"}, r) {
+		if !slices.Contains([]string{"health", "inspect", "diagnostics", "metrics"}, r) {
 			return false
 		}
 	}

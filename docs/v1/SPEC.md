@@ -10,11 +10,11 @@ Clients own scheduling, notifications, model calls, and retained monitoring hist
 
 ## Components and trust
 
-| Component   | Responsibility                                                       | Boundary                                                                    |
-| ----------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Gateway     | Streamable HTTP, bearer verification, roles, MCP dispatch, audit     | Unprivileged service identity; access to token state and TLS key            |
-| Diagnostics | Source authorization, collection, assessment, budgets                | Separate identity; optional standard-mode read capability                   |
-| Local CLI   | Tokens, policy explanation, reload/status, installation and upgrades | Local administrator or owning-user authority; never granted by an MCP token |
+| Component   | Responsibility                                                                    | Boundary                                                                    |
+| ----------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Gateway     | Streamable HTTP, bearer verification, roles, MCP dispatch, audit, service metrics | Unprivileged service identity; access to token state and TLS key            |
+| Diagnostics | Source authorization, collection, assessment, budgets                             | Separate identity; optional standard-mode read capability                   |
+| Local CLI   | Tokens, policy explanation, reload/status, installation and upgrades              | Local administrator or owning-user authority; never granted by an MCP token |
 
 Gateway and backend communicate through structured local IPC with peer-identity checks. Each call carries a generation; the backend rejects inconsistent generations. Source policies are immutable snapshots, and status reports their cached fingerprint and generation together.
 
@@ -29,6 +29,8 @@ Standard mode grants only `CAP_DAC_READ_SEARCH` to diagnostics through systemd. 
 | `health`      | `get_os_info`, `get_inventory`, `get_health_snapshot`                             |
 | `inspect`     | Health tools plus `list_services`, `get_service_status`, `list_packages`          |
 | `diagnostics` | Inspect tools plus `read_config`, `query_logs` and explicitly granted audit tools |
+
+The independent `metrics` role authorizes only service scrapes. Diagnostic roles do not inherit it. See [service metrics](OPERATIONS.md#service-metrics) for the catalog and access controls.
 
 Token expiry, revocation, and role changes apply to subsequent requests and are checked again at tool execution. Discovery is not authorization. Tokens cannot administer the host or change policy.
 
@@ -71,6 +73,7 @@ Do not add unused abstractions to anticipate these implementations. Share behavi
 | Reload and policy explanation           | [Configuration lifecycle](../../openspec/specs/configuration-lifecycle/spec.md) |
 | Credentials and roles                   | [Token authorization](../../openspec/specs/token-authorization/spec.md)         |
 | HTTP, TLS, proxies, and admission       | [Network transport](../../openspec/specs/network-transport/spec.md)             |
+| Service scrape access and bounds        | [Service metrics](../../openspec/specs/service-metrics/spec.md)                 |
 | Operational metadata                    | [Operational audit](../../openspec/specs/operational-audit/spec.md)             |
 | Install, upgrade, and removal           | [Installation lifecycle](../../openspec/specs/installation-lifecycle/spec.md)   |
 | Tests, artifacts, and releases          | [Release validation](../../openspec/specs/release-validation/spec.md)           |

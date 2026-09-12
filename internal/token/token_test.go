@@ -205,3 +205,46 @@ func TestTokenStoreRejectsNonRegularAndTrailingData(t *testing.T) {
 		t.Fatal("FIFO token store blocked authentication")
 	}
 }
+
+func TestMetricsRoleIsIndependent(t *testing.T) {
+	if !RolesOK([]string{"metrics"}) || RolesOK([]string{"admin"}) {
+		t.Fatal("role validation")
+	}
+	for _, tool := range contract.Tools {
+		if Allows([]string{"metrics"}, tool) {
+			t.Fatal("metrics grants tool", tool)
+		}
+	}
+	for _, role := range []string{"health", "inspect", "diagnostics"} {
+		for _, tool := range contract.Tools {
+			if Allows([]string{role, "metrics"}, tool) != Allows([]string{role}, tool) {
+				t.Fatal("union changed", role, tool)
+			}
+		}
+	}
+	s := Store{Path: filepath.Join(t.TempDir(), "tokens.json"), AdminUID: os.Geteuid()}
+	row, secret, err := s.Create("existing", []string{"health"}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Update(row.ID, []string{"health", "metrics"}, false); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.Verify(secret)
+	if err != nil || len(current.Roles) != 2 {
+		t.Fatal("secret changed or roles lost", err)
+	}
+	if err = s.Update(row.ID, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Update(row.ID, []string{"health"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Verify(secret); err == nil {
+		t.Fatal("metadata update reactivated revoked token")
+	}
+	s.AdminUID++
+	if s.Update(row.ID, []string{"metrics"}, false) == nil {
+		t.Fatal("metrics bypassed local admin identity")
+	}
+}

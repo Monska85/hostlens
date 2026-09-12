@@ -123,6 +123,25 @@ hostlens status --system >/tmp/status.json
 /opt/hostlens-smoke /tmp/token.json read_config visible
 /opt/hostlens-smoke /tmp/token.json get_inventory "${arch}"
 /opt/hostlens-smoke /tmp/token.json list_packages systemd
+printf '%s\n' 'HOSTLENS_STAGE: validate service metrics and reloads'
+hostlens token create --system --name scraper --roles metrics --expires "${expiry}" >/tmp/metrics-token.json
+/opt/hostlens-smoke --metrics anonymous 401
+/opt/hostlens-smoke --metrics /tmp/token.json 403
+/opt/hostlens-smoke --metrics /tmp/metrics-token.json up
+systemctl stop hostlens-diagnostics.service
+/opt/hostlens-smoke --metrics /tmp/metrics-token.json down
+systemctl start hostlens-diagnostics.service
+ready
+/opt/hostlens-smoke --metrics /tmp/metrics-token.json fresh
+sed -i 's/allow_anonymous: false/allow_anonymous: true/' /etc/hostlens/config.yaml
+hostlens reload --system >/tmp/metrics-reload.json
+/opt/hostlens-smoke --metrics anonymous up
+/opt/hostlens-smoke --metrics invalid up
+/opt/hostlens-smoke --ready
+sed -i 's/allow_anonymous: true/allow_anonymous: false/' /etc/hostlens/config.yaml
+hostlens reload --system >/tmp/metrics-reload.json
+/opt/hostlens-smoke --metrics anonymous 401
+/opt/hostlens-smoke --metrics /tmp/metrics-token.json up
 printf '%s\n' 'HOSTLENS_STAGE: verify journal access'
 systemd-run --wait --unit=hostlens-fixture /bin/echo HOSTLENS_LOG_FIXTURE
 journalctl --sync
@@ -170,6 +189,10 @@ if [ "${mode}" = standard ]; then
   nsenter --target "${pid}" --mount -- setpriv --reuid=hostlens-diagnostics --regid=hostlens-gateway \
     --init-groups \
     --inh-caps=+dac_read_search --ambient-caps=+dac_read_search /opt/hostlens-containment "${mode}" /opt/custom-secret/key.pem
+  # The fixture deliberately exceeded normal service restart frequency while
+  # testing backend loss and secret-mask rejection. Clear that test history only
+  # after restored containment has passed, before the independent upgrade case.
+  systemctl reset-failed hostlens-diagnostics.service
   sed -i 's|key_file: /opt/custom-secret/key.pem|key_file: ""|' /etc/hostlens/config.yaml
   rm /etc/systemd/system/hostlens-diagnostics.service.d/acceptance.conf
   rmdir /etc/systemd/system/hostlens-diagnostics.service.d

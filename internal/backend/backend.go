@@ -16,6 +16,7 @@ import (
 	"github.com/Monska85/hostlens/internal/config"
 	"github.com/Monska85/hostlens/internal/contract"
 	"github.com/Monska85/hostlens/internal/policy"
+	"github.com/Monska85/hostlens/internal/telemetry"
 )
 
 type Snapshot struct {
@@ -47,6 +48,8 @@ type discovery struct {
 	err    error
 }
 type Server struct {
+	metrics   *telemetry.Registry
+	scrapes   telemetry.Flight
 	mu        sync.RWMutex
 	active    Snapshot
 	pending   *Snapshot
@@ -60,7 +63,7 @@ type Server struct {
 }
 
 func New(snap Snapshot, load Loader, factory Factory, instance string) *Server {
-	s := &Server{active: snap, load: load, factory: factory, Instance: instance}
+	s := &Server{metrics: telemetry.New("backend"), active: snap, load: load, factory: factory, Instance: instance}
 	s.Log = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: s}))
 	return s
 }
@@ -131,6 +134,8 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		switch r.URL.Path {
+		case "/telemetry":
+			s.telemetryHandler(w, r)
 		case "/status":
 			status, err := s.Status(r.Context())
 			if err != nil {
@@ -223,9 +228,13 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 }
-func (s *Server) Call(ctx context.Context, req contract.Request) contract.Result {
+func (s *Server) Call(ctx context.Context, req contract.Request) (result contract.Result) {
 	s.mu.Lock()
 	snap := s.active
+	if snap.Config.Metrics.Enabled {
+		started := time.Now()
+		defer func() { s.metrics.Tool(req.Tool, result, time.Since(started)) }()
+	}
 	if req.Version != 1 || req.Generation != snap.Generation {
 		s.mu.Unlock()
 		return contract.Failure("generation_mismatch")
@@ -236,15 +245,24 @@ func (s *Server) Call(ctx context.Context, req contract.Request) contract.Result
 	}
 	s.running++
 	s.mu.Unlock()
+	if snap.Config.Metrics.Enabled {
+		s.metrics.StartTool()
+	}
 	ctx, cancel := context.WithTimeout(ctx, snap.Config.Limits.ToolTimeout)
 	defer cancel()
 	started := time.Now()
 	done := make(chan contract.Result, 1)
 	go func() {
-		defer func() { s.mu.Lock(); s.running--; s.mu.Unlock() }()
+		defer func() {
+			s.mu.Lock()
+			s.running--
+			s.mu.Unlock()
+			if snap.Config.Metrics.Enabled {
+				s.metrics.EndTool()
+			}
+		}()
 		done <- s.factory(snap).Collect(ctx, req.Tool, req.Args).Bounded(snap.Config.Limits.ResponseBytes)
 	}()
-	var result contract.Result
 	select {
 	case result = <-done:
 	case <-ctx.Done():

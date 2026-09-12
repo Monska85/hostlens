@@ -19,6 +19,14 @@ func main() {
 	if endpoint == "" {
 		endpoint = "http://127.0.0.1:8080/mcp"
 	}
+	if len(os.Args) == 4 && os.Args[1] == "--metrics" {
+		if err := metricsSmoke(endpoint, os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("Service metrics: passed")
+		return
+	}
 	if len(os.Args) == 3 && os.Args[1] == "--tcp-ready" {
 		port, err := strconv.Atoi(os.Args[2])
 		if err != nil || port < 1 || port > 65535 {

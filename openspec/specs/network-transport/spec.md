@@ -27,7 +27,7 @@ The gateway SHALL expose one Streamable HTTP MCP endpoint per listener, with a l
 
 ### Requirement: TLS and explicit plaintext exposure
 
-Native TLS SHALL be opt-in through certificate-chain and private-key paths. Non-loopback plaintext SHALL require allow_insecure_http true. Failure to load enabled TLS SHALL fail startup without HTTP fallback. Bearer authentication SHALL remain required behind proxies and on loopback. Certificate replacement SHALL require restart in v1.
+Native TLS SHALL be opt-in through certificate-chain and private-key paths. Non-loopback plaintext SHALL require allow_insecure_http true. Failure to load enabled TLS SHALL fail startup without HTTP fallback. Bearer authentication SHALL remain required for MCP behind proxies and on loopback. Metrics SHALL also require bearer authentication unless metrics.allow_anonymous is explicitly true; this exception SHALL apply only to the metrics endpoint. Certificate replacement SHALL require restart in v1.
 
 #### Scenario: Default
 
@@ -60,8 +60,13 @@ No proxies SHALL be trusted by default. Configured proxy IPs or CIDRs SHALL gove
 
 #### Scenario: No authorization by address
 
-- **WHEN** a trusted proxy forwards a request without a valid bearer token
+- **WHEN** a trusted proxy forwards an MCP request or an authentication-required metrics request without a valid bearer token
 - **THEN** authentication still fails
+
+#### Scenario: Anonymous scraping does not weaken MCP
+
+- **WHEN** metrics.allow_anonymous is true and a client sends requests without credentials
+- **THEN** the enabled metrics endpoint permits scraping but the MCP endpoint still rejects unauthenticated access, including through trusted proxies
 
 ### Requirement: Transport hardening
 

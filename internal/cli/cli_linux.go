@@ -51,7 +51,7 @@ func Main(args []string) error {
 	system := f.Bool("system", false, "use root-controlled system configuration")
 	path := f.String("config", "", "configuration path")
 	name := f.String("name", "", "token client name")
-	roles := f.String("roles", "", "comma-separated roles")
+	roles := f.String("roles", "", "comma-separated roles: health, inspect, diagnostics, metrics")
 	expires := f.String("expires", "", "required RFC3339 token expiry")
 	overlap := f.String("overlap-until", "", "required RFC3339 old-token overlap deadline")
 	id := f.String("id", "", "public token ID")
