@@ -44,6 +44,7 @@
 
 - **Be concise and direct.** State the result or instruction first. Remove repetition, circular explanations, stale claims, and prose that adds no decision or action. Keep operator procedures in one place and link to them.
 - **Write for the artifact's reader.** Human guides explain safe use; OpenSpec artifacts give agents exact requirements, testable scenarios, decisions, and truthful task status. Preserve enough detail for autonomous execution without copying the same contract across documents.
+- **Maintain the changelog.** Keep `CHANGELOG.md` following Keep a Changelog 2.0.0: `Unreleased` section on top, one `## x.y.z - YYYY-MM-DD` heading per version (plain text, no square brackets or reference-style links), entries grouped under the six change types. From the second release onward, place a `Compare with previous release` link on the line immediately after each release heading, pointing at the GitHub compare between the previous and new tags; the first release carries no such link.
 
 ## Maintain these instructions
 
