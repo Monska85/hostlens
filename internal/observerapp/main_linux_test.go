@@ -32,6 +32,8 @@ func writeObserverConfig(t *testing.T, mutate func(*config.Config)) string {
 }
 
 func TestMainShowsHelpAndVersion(t *testing.T) {
+	t.Parallel()
+
 	for _, args := range [][]string{nil, {"--help"}, {"help"}} {
 		if e := Main(args); e != nil {
 			t.Fatalf("help %v returned %v", args, e)
@@ -46,12 +48,16 @@ func TestMainShowsHelpAndVersion(t *testing.T) {
 }
 
 func TestMainRefusesUnknownSubcommand(t *testing.T) {
+	t.Parallel()
+
 	if e := Main([]string{"reconcile"}); e == nil || !strings.Contains(e.Error(), "serve and version only") {
 		t.Fatalf("unknown subcommand accepted: %v", e)
 	}
 }
 
 func TestMainRefusesBadServeArgs(t *testing.T) {
+	t.Parallel()
+
 	if e := Main([]string{"serve", "extra"}); e == nil || !strings.Contains(e.Error(), "unexpected positional") {
 		t.Fatalf("positional arguments accepted: %v", e)
 	}
@@ -61,6 +67,8 @@ func TestMainRefusesBadServeArgs(t *testing.T) {
 }
 
 func TestMainRefusesUnreadableConfig(t *testing.T) {
+	t.Parallel()
+
 	if e := Main([]string{"serve", "--config", filepath.Join(t.TempDir(), "absent.yaml")}); e == nil {
 		t.Fatal("missing configuration accepted")
 	}
@@ -71,6 +79,8 @@ func TestMainRefusesUnreadableConfig(t *testing.T) {
 }
 
 func TestMainRefusesInvalidConfig(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "bad.yaml")
 	if e := os.WriteFile(path, []byte("version: 1\nno_such_key: true\n"), 0644); e != nil {
 		t.Fatal(e)
@@ -87,6 +97,8 @@ func TestMainRefusesInvalidConfig(t *testing.T) {
 }
 
 func TestMainRefusesDockerDisabled(t *testing.T) {
+	t.Parallel()
+
 	path := writeObserverConfig(t, func(c *config.Config) { c.Docker.Enabled = false })
 	if e := Main([]string{"serve", "--config", path}); e == nil || !strings.Contains(e.Error(), "refuses to start") {
 		t.Fatalf("disabled docker accepted: %v", e)
@@ -94,6 +106,8 @@ func TestMainRefusesDockerDisabled(t *testing.T) {
 }
 
 func TestMainRefusesUnavailableIdentities(t *testing.T) {
+	t.Parallel()
+
 	// The observer endpoint lives under a regular file so, if the system
 	// really carries the configured identities, the run stops at the
 	// directory creation instead of serving. In the common test container

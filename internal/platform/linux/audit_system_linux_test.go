@@ -37,6 +37,8 @@ func auditHasIssue(r contract.Result, code string) bool {
 	return false
 }
 func TestAuditAccountsExcludeSecretsAndPageGroups(t *testing.T) {
+	t.Parallel()
+
 	c := auditSystemFixture(t, map[string]string{"/etc/passwd": "root:HASH_SECRET:0:0:PRIVATE_COMMENT:/root:/bin/sh\nbad:x:no:0::/:/bin/sh\npostgres:x:999:999::/var/lib/postgresql:/bin/sh\n", "/etc/group": "database:GROUP_HASH:999:postgres,operator\n"})
 	r := auditSystemResult()
 	c.auditAccounts(context.Background(), &r, contract.Args{Limit: 1})
@@ -61,6 +63,8 @@ func TestAuditAccountsExcludeSecretsAndPageGroups(t *testing.T) {
 	}
 }
 func TestAuditStorageOmitsMountCredentialsAndMarksMalformed(t *testing.T) {
+	t.Parallel()
+
 	c := auditSystemFixture(t, map[string]string{"/proc/partitions": "major minor  #blocks  name\n8 0 100 sda\n8 1 INVALID sda1\n", "/proc/self/mountinfo": "24 1 8:0 / /data\\040set rw,nosuid,nodev - cifs //user:SECRET@host/share rw,password=SECRET\nbroken\n", "/proc/mdstat": "Personalities : [raid1]\nmd0 : active raid1 sda[0]\n  100 blocks [2/1] [U_]\nunused devices: <none>\n"})
 	r := auditSystemResult()
 	c.auditStorage(context.Background(), &r)
@@ -77,6 +81,8 @@ func TestAuditStorageOmitsMountCredentialsAndMarksMalformed(t *testing.T) {
 	}
 }
 func TestAuditUpdatesExpiredMetadataAndPolicy(t *testing.T) {
+	t.Parallel()
+
 	c := auditSystemFixture(t, map[string]string{"/var/lib/apt/lists/example_InRelease": "Date: Thu, 10 Sep 2026 00:00:00 UTC\nValid-Until: Fri, 11 Sep 2026 00:00:00 UTC\nOrigin: SECRET\n"})
 	r := auditSystemResult()
 	c.auditUpdates(context.Background(), &r)
@@ -95,6 +101,8 @@ func TestAuditUpdatesExpiredMetadataAndPolicy(t *testing.T) {
 	}
 }
 func TestAuditSecurityMalformedAndMissingControls(t *testing.T) {
+	t.Parallel()
+
 	c := auditSystemFixture(t, map[string]string{"/proc/sys/kernel/randomize_va_space": "2\n", "/proc/sys/kernel/kptr_restrict": "invalid\n", "/sys/kernel/security/lsm": "lockdown,capability,landlock\n"})
 	r := auditSystemResult()
 	c.auditSecurity(context.Background(), &r)
@@ -105,6 +113,8 @@ func TestAuditSecurityMalformedAndMissingControls(t *testing.T) {
 }
 
 func TestAuditSystemUnavailableVersusPartialEvidence(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name            string
 		source, content string
@@ -134,6 +144,8 @@ func TestAuditSystemUnavailableVersusPartialEvidence(t *testing.T) {
 }
 
 func TestAuditSystemRecordAndReadBudgetLimits(t *testing.T) {
+	t.Parallel()
+
 	c := auditSystemFixture(t, map[string]string{
 		"/etc/passwd":      strings.Repeat("user:x:1:1::/:/bin/sh\n", auditMaxEntries+1),
 		"/etc/group":       "users:x:1:user\n",
@@ -159,6 +171,8 @@ func TestAuditSystemRecordAndReadBudgetLimits(t *testing.T) {
 }
 
 func TestAuditSystemSourceClassification(t *testing.T) {
+	t.Parallel()
+
 	for _, err := range []error{syscall.EACCES, syscall.EPERM} {
 		if got := auditErrorCode(&os.PathError{Op: "open", Path: "/restricted", Err: err}); got != "permission_denied" {
 			t.Fatalf("OS denial classified %s", got)

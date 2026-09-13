@@ -11,6 +11,8 @@ import (
 )
 
 func TestPackagesUseInstalledStateRatherThanDesiredAction(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	fixtureOK(t, os.MkdirAll(filepath.Join(root, "var/lib/dpkg"), 0755))

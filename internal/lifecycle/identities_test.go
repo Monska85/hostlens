@@ -56,6 +56,22 @@ func TestServiceGroupsRecheckedAfterCreation(t *testing.T) {
 	if _, err := os.Stat(m.path("/usr/local/bin/hostlens")); !os.IsNotExist(err) {
 		t.Fatal("binary installed before group recheck", err)
 	}
+	// A UID collision surfacing only after account creation must stop the
+	// install before any runnable unit exists.
+	m, source, sys = setup(t)
+	m.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		b, err := sys.run(ctx, name, args...)
+		if name == "useradd" && err == nil {
+			sys.users[args[len(args)-1]] = 200
+		}
+		return b, err
+	}
+	if err := m.Install(context.Background(), source, false); err == nil || !strings.Contains(err.Error(), "share UID") {
+		t.Fatalf("collision accepted: %v", err)
+	}
+	if _, err := os.Stat(m.path("/etc/systemd/system/hostlens-gateway.service")); !os.IsNotExist(err) {
+		t.Fatal("created runnable units before verifying identities", err)
+	}
 }
 
 func TestUninstallOwnershipScanFailurePreservesIdentityAndAllowsRetry(t *testing.T) {

@@ -28,6 +28,8 @@ func (s schemaCollector) Collect(ctx context.Context, tool string, args contract
 }
 
 func TestToolArgumentContracts(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	snap := backend.Snapshot{Config: cfg, Generation: "schema-test"}
 	var calls atomic.Int32

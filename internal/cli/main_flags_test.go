@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -188,6 +189,24 @@ func TestPolicyExplainExplainsPathsAndDockerTargets(t *testing.T) {
 	if !strings.Contains(out, "docker:container/web") {
 		t.Fatalf("docker target lost: %q", out)
 	}
+	// A Docker target denied by a matching rule explains the refusal with
+	// provenance and never claims a path resolution.
+	cfg.Deny.Docker = []string{"container/db"}
+	b, e = yaml.Marshal(cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(path, b, 0600); e != nil {
+		t.Fatal(e)
+	}
+	out = captureStdout(t, func() {
+		if e := Main([]string{"policy", "explain", "docker:container/db", "--config", path}); e != nil {
+			t.Fatal(e)
+		}
+	})
+	if !strings.Contains(out, `"decision": "denied"`) || !strings.Contains(out, "container/db") {
+		t.Fatalf("docker deny explanation lost: %q", out)
+	}
 	// A target that cannot be resolved stays unevaluable, not denied.
 	out = captureStdout(t, func() {
 		if e := Main([]string{"policy", "explain", filepath.Join(t.TempDir(), "absent-path"), "--config", path}); e != nil {
@@ -201,4 +220,83 @@ func TestPolicyExplainExplainsPathsAndDockerTargets(t *testing.T) {
 	if e := Main([]string{"policy", "explain", "--config", path}); e == nil {
 		t.Fatal("missing target accepted")
 	}
+	// System-mode configuration reads require trusted root ownership; the
+	// disposable container suite runs this as root. A Docker target explained
+	// through a trusted system configuration resolves every matching rule.
+	t.Run("system-mode", func(t *testing.T) {
+		if os.Geteuid() != 0 {
+			t.Skip("system-mode explain requires root-owned configuration")
+		}
+		root := t.TempDir()
+		systemConfig := filepath.Join(root, "config.yaml")
+		dirs := filepath.Join(root, "profiles")
+		if err := os.MkdirAll(dirs, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := fmt.Sprintf(`version: 1
+mode: system
+privilege: standard
+profile_dirs: [%s]
+profiles: [docker-acceptance]
+mcp:
+  read_only: true
+metrics:
+  enabled: true
+  allow_anonymous: false
+allow:
+  files: [/**]
+  journal: []
+deny:
+  files: []
+  journal: []
+`, dirs)
+		if err := os.WriteFile(systemConfig, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		profile := filepath.Join(dirs, "docker-acceptance.yaml")
+		if err := os.WriteFile(profile, []byte("profiles: []\nallow:\n  docker: [container/*]\ndeny:\n  docker: [container/db]\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		out, e := captureStdoutError(t, func() error {
+			return Main([]string{"policy", "explain", "--system", "--config", systemConfig, "docker:container/web"})
+		})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if !strings.Contains(out, `"decision": "allowed"`) || !strings.Contains(out, "docker:container/web") {
+			t.Fatal(out)
+		}
+		out, e = captureStdoutError(t, func() error {
+			return Main([]string{"policy", "explain", "--system", "--config", systemConfig, "docker:container/db"})
+		})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if !strings.Contains(out, `"decision": "denied"`) || !strings.Contains(out, "container/db") {
+			t.Fatal("explanation must identify the matching deny rule", out)
+		}
+	})
+}
+
+func captureStdoutError(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	r, w, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	done := make(chan error, 1)
+	go func() {
+		e := fn()
+		w.Close()
+		done <- e
+	}()
+	b, readErr := io.ReadAll(r)
+	os.Stdout = stdout
+	r.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	return string(b), <-done
 }

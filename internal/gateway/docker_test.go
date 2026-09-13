@@ -26,6 +26,8 @@ func (c dockerCapabilityCollector) Collect(context.Context, string, contract.Arg
 }
 
 func TestDockerToolDiscoveryIsRoleAndCapabilityAware(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	p, err := policy.CompileLinux(config.Config{}, "/config", nil)
 	if err != nil {
@@ -76,12 +78,9 @@ func TestDockerToolDiscoveryIsRoleAndCapabilityAware(t *testing.T) {
 		}
 		closeServer()
 	}
-}
-
-// TestDockerTopologyIsRestartOnly proves the restart fingerprint reacts to
-// every Docker topology setting while shared reloadable settings stay free.
-func TestDockerTopologyIsRestartOnly(t *testing.T) {
-	cfg := config.DefaultsLinux(false)
+	// The restart fingerprint reacts to every Docker topology setting while
+	// shared reloadable settings stay free.
+	cfg = config.DefaultsLinux(false)
 	cfg.TokenStore = filepath.Join(t.TempDir(), "tokens.json")
 	base, err := RestartFingerprint(backend.NewSnapshot(cfg, mustPolicy(t, cfg)))
 	if err != nil {

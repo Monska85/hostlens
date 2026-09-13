@@ -18,6 +18,8 @@ import (
 )
 
 func TestCallPreservesContextFailure(t *testing.T) {
+	t.Parallel()
+
 	for _, stage := range []string{"/status", "/call"} {
 		for _, cancelled := range []bool{false, true} {
 			t.Run(stage+"/"+map[bool]string{false: "timeout", true: "cancelled"}[cancelled], func(t *testing.T) {
@@ -47,6 +49,8 @@ func TestCallPreservesContextFailure(t *testing.T) {
 }
 
 func TestMCPDeadlineIsNotBackendFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.Limits.ToolTimeout = 20 * time.Millisecond
 	c := Coordinator{Active: backend.Snapshot{Config: cfg, Generation: "one"}, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) { return token.Record{ID: "test", Roles: []string{"health"}}, nil }), HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -85,6 +89,8 @@ func (c cancelledCollector) Collect(ctx context.Context, _ string, _ contract.Ar
 }
 
 func TestHTTPMCPTimeoutResponseAndDisconnectCancellation(t *testing.T) {
+	t.Parallel()
+
 	for _, disconnect := range []bool{false, true} {
 		t.Run(map[bool]string{false: "timeout", true: "disconnect"}[disconnect], func(t *testing.T) {
 			cfg := config.DefaultsLinux(false)

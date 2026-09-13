@@ -28,6 +28,8 @@ func auditFixture(t *testing.T) (*Collector, string) {
 }
 
 func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
+	t.Parallel()
+
 	c, _ := fixture(t)
 	for _, tool := range contract.ToolNames() {
 		if contract.AuditDomain(tool) == "" {
@@ -50,9 +52,28 @@ func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 			t.Fatalf("%s: %+v", tc.tool, r)
 		}
 	}
+	// Pagination bounds are validated before any collection runs.
+	for _, tool := range []string{"list_processes", "list_accounts"} {
+		r := c.Collect(context.Background(), tool, contract.Args{Limit: c.Config.Limits.PageSize + 1})
+		if !r.Error || r.Data["coverage_complete"] != false || len(r.Issues) != 1 || r.Issues[0].Code != "invalid_arguments" {
+			t.Fatalf("invalid bounds reached collection: %+v", r)
+		}
+	}
+	// Undenied native storage dependencies stay verbatim; filtering must not
+	// over-redact.
+	c.Runner = auditRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("Id=example.service\nLoadState=loaded\nRequires=dev-sda.device dev-sda2.swap -.mount\n"), nil
+	})
+	r := c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "example.service"})
+	b, _ := json.Marshal(r)
+	if r.Error || !strings.Contains(string(b), "dev-sda.device dev-sda2.swap -.mount") {
+		t.Fatalf("native dependencies lost: %+v", r)
+	}
 }
 
 func TestAuditPathMetadataRespectsObjectsAndAliases(t *testing.T) {
+	t.Parallel()
+
 	c, root := auditFixture(t)
 	fixtureOK(t, os.MkdirAll(filepath.Join(root, "etc"), 0755))
 	fixtureOK(t, os.WriteFile(filepath.Join(root, "etc/public"), []byte("DO NOT RETURN CONTENT"), 0640))
@@ -83,6 +104,8 @@ func TestAuditPathMetadataRespectsObjectsAndAliases(t *testing.T) {
 }
 
 func TestHostlensAuditDoesNotReturnSecretConfiguration(t *testing.T) {
+	t.Parallel()
+
 	c, _ := auditFixture(t)
 	c.Config.Server.TLS.KeyFile = "/never-expose-key-location"
 	c.Config.TokenStore = "/never-expose-token-location"
@@ -99,6 +122,8 @@ func (f auditRunnerFunc) Run(ctx context.Context, n string, a ...string) ([]byte
 	return f(ctx, n, a...)
 }
 func TestServiceAuditSelectsSafeProperties(t *testing.T) {
+	t.Parallel()
+
 	c, _ := auditFixture(t)
 	c.Runner = auditRunnerFunc(func(_ context.Context, name string, args ...string) ([]byte, error) {
 		joined := strings.Join(args, " ")
@@ -121,6 +146,8 @@ func TestServiceAuditSelectsSafeProperties(t *testing.T) {
 }
 
 func TestServiceAuditRejectsDeniedCanonicalAlias(t *testing.T) {
+	t.Parallel()
+
 	c, _ := auditFixture(t)
 	c.Config.Deny.Journal = []string{"ssh.service"}
 	c.Policy, _ = policy.CompileLinux(c.Config, "/configuration.yaml", nil)
@@ -134,6 +161,8 @@ func TestServiceAuditRejectsDeniedCanonicalAlias(t *testing.T) {
 }
 
 func TestAuditRootMetadataExactGrant(t *testing.T) {
+	t.Parallel()
+
 	c, _ := auditFixture(t)
 	c.Config.Allow.Files = []string{"/"}
 	c.Policy, _ = policy.CompileLinux(c.Config, "/configuration.yaml", nil)
@@ -144,6 +173,8 @@ func TestAuditRootMetadataExactGrant(t *testing.T) {
 }
 
 func TestAuditServiceDiscoveryRequiresRuntime(t *testing.T) {
+	t.Parallel()
+
 	c, _ := auditFixture(t)
 	if c.Capabilities(context.Background())["inspect_service"] {
 		t.Fatal("advertised missing systemd service collector")
@@ -151,6 +182,8 @@ func TestAuditServiceDiscoveryRequiresRuntime(t *testing.T) {
 }
 
 func TestServiceAuditFiltersDeniedDependencies(t *testing.T) {
+	t.Parallel()
+
 	c, _ := auditFixture(t)
 	c.Config.Deny.Journal = []string{"secret.service", "-.mount"}
 	c.Policy, _ = policy.CompileLinux(c.Config, "/configuration.yaml", nil)
@@ -161,27 +194,5 @@ func TestServiceAuditFiltersDeniedDependencies(t *testing.T) {
 	b, _ := json.Marshal(r)
 	if r.Error || strings.Contains(string(b), "secret.service") || strings.Contains(string(b), "-.mount") || !strings.Contains(string(b), "allowed.service") {
 		t.Fatalf("dependency denial failed: %+v", r)
-	}
-}
-
-func TestAuditPaginationBoundsBeforeCollection(t *testing.T) {
-	c, _ := auditFixture(t)
-	for _, tool := range []string{"list_processes", "list_accounts"} {
-		r := c.Collect(context.Background(), tool, contract.Args{Limit: c.Config.Limits.PageSize + 1})
-		if !r.Error || r.Data["coverage_complete"] != false || len(r.Issues) != 1 || r.Issues[0].Code != "invalid_arguments" {
-			t.Fatalf("invalid bounds reached collection: %+v", r)
-		}
-	}
-}
-
-func TestServiceAuditPreservesNativeStorageDependencies(t *testing.T) {
-	c, _ := auditFixture(t)
-	c.Runner = auditRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("Id=example.service\nLoadState=loaded\nRequires=dev-sda.device dev-sda2.swap -.mount\n"), nil
-	})
-	r := c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "example.service"})
-	b, _ := json.Marshal(r)
-	if r.Error || !strings.Contains(string(b), "dev-sda.device dev-sda2.swap -.mount") {
-		t.Fatalf("native dependencies lost: %+v", r)
 	}
 }

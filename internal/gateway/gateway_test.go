@@ -27,6 +27,8 @@ import (
 )
 
 func TestProxyChains(t *testing.T) {
+	t.Parallel()
+
 	for _, tt := range []struct{ peer, header, want string }{{"192.0.2.1", "8.8.8.8", "192.0.2.1"}, {"127.0.0.1", "198.51.100.2, 127.0.0.2", "198.51.100.2"}, {"127.0.0.1", "garbage, 198.51.100.2", "127.0.0.1"}, {"::1", "2001:db8::2", "2001:db8::2"}, {"127.0.0.1", "127.0.0.2", "127.0.0.1"}} {
 		if got := ClientIP(tt.peer, tt.header, []string{"127.0.0.0/8", "::1"}); got != tt.want {
 			t.Errorf("%s -> %s want %s", tt.header, got, tt.want)
@@ -34,6 +36,8 @@ func TestProxyChains(t *testing.T) {
 	}
 }
 func TestListenerCleanupAndTLSFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.Server.Bind = []string{"127.0.0.1", "192.0.2.254"}
 	cfg.Server.Port = 32149
@@ -73,6 +77,8 @@ func (observedCollector) Collect(context.Context, string, contract.Args) contrac
 	return contract.Result{ObservedAt: time.Now(), Data: map[string]any{"observed": 0}}
 }
 func TestMCPAuthorizationAndReload(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.TokenStore = filepath.Join(t.TempDir(), "tokens.json")
 	p, err := policy.CompileLinux(cfg, "/config", nil)
@@ -151,6 +157,8 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestEffectGateRejectsBeforeBackendAccess(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	var backendCalls atomic.Int32
 	c := Coordinator{Active: backend.Snapshot{Config: cfg, Generation: "one"}, HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -160,6 +168,12 @@ func TestEffectGateRejectsBeforeBackendAccess(t *testing.T) {
 	result, err := c.Call(context.Background(), "remembered_remediation", contract.Args{}, "request")
 	if err == nil || !result.Error || result.Issues[0].Code != "operation_denied" || backendCalls.Load() != 0 {
 		t.Fatal("unclassified operation crossed authority boundary", result, err, backendCalls.Load())
+	}
+	// The known remediation effect obeys the read-only gate: admitted only
+	// when the tool is known and the snapshot is writable.
+	remediation := contract.ToolDefinition{Effect: contract.EffectRemediation}
+	if toolAdmitted(remediation, true, true) || !toolAdmitted(remediation, true, false) || toolAdmitted(remediation, false, false) {
+		t.Fatal("known remediation effect bypassed or ignored the read-only gate")
 	}
 }
 
@@ -191,14 +205,9 @@ type admissionTransition struct{ probe *admissionProbe }
 func (t admissionTransition) Commit()   { t.probe.commits++ }
 func (t admissionTransition) Rollback() { t.probe.rollbacks++ }
 
-func TestKnownRemediationEffectUsesReadOnlyGate(t *testing.T) {
-	remediation := contract.ToolDefinition{Effect: contract.EffectRemediation}
-	if toolAdmitted(remediation, true, true) || !toolAdmitted(remediation, true, false) || toolAdmitted(remediation, false, false) {
-		t.Fatal("known remediation effect bypassed or ignored the read-only gate")
-	}
-}
-
 func TestReloadClosesRemediationBeforeActivationAndRestoresOnFailure(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.MCP.ReadOnly = false
 	p, err := policy.CompileLinux(cfg, "/config", nil)
@@ -244,6 +253,8 @@ func TestReloadClosesRemediationBeforeActivationAndRestoresOnFailure(t *testing.
 }
 
 func TestReloadRejectsWhenRemediationCannotDrain(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.MCP.ReadOnly = false
 	p, err := policy.CompileLinux(cfg, "/config", nil)
@@ -267,6 +278,8 @@ func TestReloadRejectsWhenRemediationCannotDrain(t *testing.T) {
 }
 
 func TestReloadRollsBackPartiallyPreparedAdmission(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	p, err := policy.CompileLinux(cfg, "/config", nil)
 	if err != nil {
@@ -289,6 +302,8 @@ func TestReloadRollsBackPartiallyPreparedAdmission(t *testing.T) {
 }
 
 func TestReloadRejectsMissingAdmissionTransition(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	p, err := policy.CompileLinux(cfg, "/config", nil)
 	if err != nil {
@@ -310,6 +325,8 @@ func TestReloadRejectsMissingAdmissionTransition(t *testing.T) {
 }
 
 func TestNativeTLSAndCertificateReload(t *testing.T) {
+	t.Parallel()
+
 	template := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer template.Close()
 	dir := t.TempDir()
@@ -369,6 +386,8 @@ func (c resultCollector) Collect(context.Context, string, contract.Args) contrac
 }
 
 func TestMCPExecutionErrorFlags(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.TokenStore = filepath.Join(t.TempDir(), "tokens.json")
 	p, err := policy.CompileLinux(cfg, "/config", nil)
@@ -494,9 +513,68 @@ func TestAdmissionBeforeAuthenticationAndRelease(t *testing.T) {
 	if w = request(); w.Code != http.StatusUnauthorized || reads.Load() != 2 {
 		t.Fatalf("authentication failure leaked admission: code=%d reads=%d", w.Code, reads.Load())
 	}
+	// A slow admitted backend call holds the slot: the next request is
+	// rejected immediately instead of queueing behind it.
+	cfg = config.DefaultsLinux(false)
+	cfg.Limits.Concurrent = 1
+	cfg.Limits.ToolTimeout = 2 * time.Second
+	backendEntered := make(chan struct{})
+	backendRelease := make(chan struct{})
+	bs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/status" {
+			json.NewEncoder(w).Encode(backend.Status{Generation: "g", Capabilities: map[string]bool{"get_os_info": true}})
+			return
+		}
+		close(backendEntered)
+		select {
+		case <-backendRelease:
+		case <-r.Context().Done():
+			return
+		}
+		json.NewEncoder(w).Encode(contract.Result{Data: map[string]any{"observed": true}})
+	}))
+	defer bs.Close()
+	defer close(backendRelease)
+	client := bs.Client()
+	client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r.URL.Host = strings.TrimPrefix(bs.URL, "http://")
+		return http.DefaultTransport.RoundTrip(r)
+	})
+	c = &Coordinator{Active: backend.Snapshot{Config: cfg, Generation: "g"}, HTTP: client, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) {
+		return token.Record{ID: "client", Roles: []string{"health"}}, nil
+	})}
+	handler = c.Handler()
+	firstDone := make(chan struct{})
+	go func() { handler.ServeHTTP(httptest.NewRecorder(), diagnosticRequest()); close(firstDone) }()
+	select {
+	case <-backendEntered:
+	case <-time.After(time.Second):
+		t.Fatal("diagnostic call did not start")
+	}
+	overloadDone := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, diagnosticRequest())
+		overloadDone <- w.Code
+	}()
+	select {
+	case code := <-overloadDone:
+		if code != http.StatusServiceUnavailable {
+			t.Fatalf("expected immediate overload, got %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("admission queued behind the running backend call")
+	}
+	select {
+	case <-firstDone:
+		t.Fatal("slow call ended before overload assertion")
+	default:
+	}
 }
 
 func TestDiscoveryCancellationReleasesAdmission(t *testing.T) {
+	t.Parallel()
+
 	for _, cancelRequest := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cancel=%t", cancelRequest), func(t *testing.T) {
 			cfg := config.DefaultsLinux(false)
@@ -549,64 +627,6 @@ func diagnosticRequest() *http.Request {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json, text/event-stream")
 	return r
-}
-
-func TestSlowCallDoesNotQueueAdmission(t *testing.T) {
-	cfg := config.DefaultsLinux(false)
-	cfg.Limits.Concurrent = 1
-	cfg.Limits.ToolTimeout = 2 * time.Second
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	bs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/status" {
-			json.NewEncoder(w).Encode(backend.Status{Generation: "g", Capabilities: map[string]bool{"get_os_info": true}})
-			return
-		}
-		close(entered)
-		select {
-		case <-release:
-		case <-r.Context().Done():
-			return
-		}
-		json.NewEncoder(w).Encode(contract.Result{Data: map[string]any{"observed": true}})
-	}))
-	defer bs.Close()
-	defer close(release)
-	client := bs.Client()
-	client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		r.URL.Host = strings.TrimPrefix(bs.URL, "http://")
-		return http.DefaultTransport.RoundTrip(r)
-	})
-	c := &Coordinator{Active: backend.Snapshot{Config: cfg, Generation: "g"}, HTTP: client, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) {
-		return token.Record{ID: "client", Roles: []string{"health"}}, nil
-	})}
-	handler := c.Handler()
-	firstDone := make(chan struct{})
-	go func() { handler.ServeHTTP(httptest.NewRecorder(), diagnosticRequest()); close(firstDone) }()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("diagnostic call did not start")
-	}
-	done := make(chan int, 1)
-	go func() {
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, diagnosticRequest())
-		done <- w.Code
-	}()
-	select {
-	case code := <-done:
-		if code != http.StatusServiceUnavailable {
-			t.Fatalf("expected immediate overload, got %d", code)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("admission queued behind the running backend call")
-	}
-	select {
-	case <-firstDone:
-		t.Fatal("slow call ended before overload assertion")
-	default:
-	}
 }
 
 func TestReloadDoesNotBlockRequestDeadlineOrStatus(t *testing.T) {
@@ -678,24 +698,8 @@ func TestReloadDoesNotBlockRequestDeadlineOrStatus(t *testing.T) {
 			}
 		})
 	}
-}
-
-type blockingRecorder struct {
-	*httptest.ResponseRecorder
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (w *blockingRecorder) Write(payload []byte) (int, error) {
-	w.once.Do(func() {
-		close(w.entered)
-		<-w.release
-	})
-	return w.ResponseRecorder.Write(payload)
-}
-
-func TestToolDiscoveryHoldsGenerationUntilResponseCompletes(t *testing.T) {
+	// Tool discovery holds the generation until the response completes:
+	// a reload may not cross an in-flight discovery response.
 	cfg := config.DefaultsLinux(false)
 	cfg.MCP.ReadOnly = false
 	p, err := policy.CompileLinux(cfg, "/config", nil)
@@ -711,7 +715,7 @@ func TestToolDiscoveryHoldsGenerationUntilResponseCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	loadEntered := make(chan struct{})
-	c := Coordinator{Active: active, Restart: restart, Load: func() (backend.Snapshot, error) {
+	c := &Coordinator{Active: active, Restart: restart, Load: func() (backend.Snapshot, error) {
 		close(loadEntered)
 		return candidate, nil
 	}, Log: slog.Default(), Tokens: verifyFunc(func(string) (token.Record, error) {
@@ -759,7 +763,24 @@ func TestToolDiscoveryHoldsGenerationUntilResponseCompletes(t *testing.T) {
 	}
 }
 
+type blockingRecorder struct {
+	*httptest.ResponseRecorder
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingRecorder) Write(payload []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.entered)
+		<-w.release
+	})
+	return w.ResponseRecorder.Write(payload)
+}
+
 func TestQueuedReloadCannotDeadlockAdmittedToolCall(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	p, err := policy.CompileLinux(cfg, "/config", nil)
 	if err != nil {

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Cut the internal test suite wall time from 18.3s to 11.9s by merging 42 zero-delta tests into their covering tests, shrinking deadline-driven waits to config values, and running independent tests in parallel; statement coverage stays at 85.8%.
 - Delete verified dead code from the observer contract (`ValidName`, `UniqueSize`, `References`/`ResourceRefs`, `Response.Negotiated`, `EngineInfo` mode flags, summary size fields, `Request.Offset`/`Limit`); the diagnostic backend and observer ship version-coherent.
 - Raise internal test coverage from 77.5% to 85.8% with observer transport, listener, archive, lifecycle, CLI, gateway, and CPU-health tests; document the intentionally uncovered surface in `docs/v1/VALIDATION.md`.
 

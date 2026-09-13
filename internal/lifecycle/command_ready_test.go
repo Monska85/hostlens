@@ -31,8 +31,8 @@ func TestCommandRefusesRootedExecution(t *testing.T) {
 
 func TestCommandExecutesAbsoluteNames(t *testing.T) {
 	m := Manager{}
-	out, e := m.command(context.Background(), "/bin/echo", "ready")
-	if e != nil || strings.TrimSpace(string(out)) != "ready" {
+	out, e := m.command(context.Background(), "/bin/echo", "one", "two")
+	if e != nil || strings.TrimSpace(string(out)) != "one two" {
 		t.Fatalf("absolute execution lost: %q %v", out, e)
 	}
 }
@@ -44,14 +44,6 @@ func TestCommandReportsUnavailableExecutables(t *testing.T) {
 	}
 	if _, e := m.command(context.Background(), "/no/such/absolute/tool"); e == nil {
 		t.Fatal("missing absolute executable accepted")
-	}
-}
-
-func TestCommandExecutesRealEcho(t *testing.T) {
-	m := Manager{}
-	out, e := m.command(context.Background(), "/bin/echo", "one", "two")
-	if e != nil || strings.TrimSpace(string(out)) != "one two" {
-		t.Fatalf("real execution lost: %q %v", out, e)
 	}
 }
 

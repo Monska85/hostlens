@@ -110,6 +110,8 @@ func newTestClient(t *testing.T, engine *modeEngine) *client {
 }
 
 func TestLogsItemErrorStatuses(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	c := newTestClient(t, engine)
 	request := dockerobs.Request{Version: 1, Operation: dockerobs.OpContainerLogs, Selector: id64(7), Logs: dockerobs.LogOptions{Records: 5, MaxBytes: 512}}
@@ -177,6 +179,8 @@ func TestLogsStalledEngineReportsContext(t *testing.T) {
 }
 
 func TestLogsNegotiationPending(t *testing.T) {
+	t.Parallel()
+
 	c := newClient(filepath.Join(t.TempDir(), "docker.sock"), 0)
 	response := c.containerLogs(context.Background(), dockerobs.Request{Version: 1, Operation: dockerobs.OpContainerLogs, Selector: id64(7)})
 	if !response.Failed || !strings.Contains(response.Reason, "negotiation pending") {
@@ -188,6 +192,8 @@ func TestLogsNegotiationPending(t *testing.T) {
 }
 
 func TestUpstreamPathAndCeilings(t *testing.T) {
+	t.Parallel()
+
 	for op, want := range map[string]string{
 		dockerobs.OpEngineInfo:      "/info",
 		dockerobs.OpContainerList:   "/containers/json",
@@ -236,6 +242,8 @@ func c2GetTypedUnsupported() ([]byte, error) {
 }
 
 func TestDecodeGuardsRejectMalformedAndExtraDocuments(t *testing.T) {
+	t.Parallel()
+
 	if _, _, e := decodeList[map[string]any]([]byte("{not json"), 10); e == nil {
 		t.Fatal("malformed list accepted")
 	}
@@ -266,9 +274,7 @@ func TestDecodeGuardsRejectMalformedAndExtraDocuments(t *testing.T) {
 	if e := decodeObject([]byte(`{"a":1}`), &map[string]any{}); e != nil {
 		t.Fatalf("single object rejected: %v", e)
 	}
-}
 
-func TestEnsureObjectRejectsTrailingDocument(t *testing.T) {
 	dec := json.NewDecoder(strings.NewReader(`{"a":1} {"b":2}`))
 	var first map[string]any
 	if e := dec.Decode(&first); e != nil {
@@ -287,6 +293,8 @@ func TestEnsureObjectRejectsTrailingDocument(t *testing.T) {
 }
 
 func TestObserveRejectsUnsupportedOperation(t *testing.T) {
+	t.Parallel()
+
 	engine := newRecordingEngine(t)
 	s := NewServer(engine.path, 0)
 	defer s.Close()
@@ -298,6 +306,8 @@ func TestObserveRejectsUnsupportedOperation(t *testing.T) {
 }
 
 func TestRunSlotUnavailableReportsFailure(t *testing.T) {
+	t.Parallel()
+
 	engine := newRecordingEngine(t)
 	s := NewServer(engine.path, 0)
 	defer s.Close()
@@ -314,6 +324,8 @@ func TestRunSlotUnavailableReportsFailure(t *testing.T) {
 }
 
 func TestParseDockerTimeRejectsGarbage(t *testing.T) {
+	t.Parallel()
+
 	if parseDockerTime("") != nil {
 		t.Fatal("empty timestamp must stay nil")
 	}
@@ -341,6 +353,8 @@ func concatFrames(frames ...[]byte) []byte {
 }
 
 func TestDecodeLogStreamNonTTYBranches(t *testing.T) {
+	t.Parallel()
+
 	// Complete stream: stdout, stderr, a system frame, and an untimestamped
 	// content frame that still carries a readable message.
 	body := concatFrames(
@@ -405,6 +419,8 @@ func TestDecodeLogStreamNonTTYBranches(t *testing.T) {
 }
 
 func TestDecodeLogStreamTTYBranches(t *testing.T) {
+	t.Parallel()
+
 	body := "2026-09-13T10:00:00Z first\nnot-a-timestamp line\n2026-09-13T10:00:01Z second\n\n"
 	page, e := decodeLogStream(strings.NewReader(body), 4096, true)
 	if e != nil {
@@ -437,6 +453,8 @@ type errReader struct{}
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("device failure") }
 
 func TestTimestampedSanitizesAndPrefixes(t *testing.T) {
+	t.Parallel()
+
 	record, ok := timestamped([]byte("2026-09-13T10:00:00.123456789Z hello\r\n"))
 	if !ok || record.Stream != "stdout" || record.Message != "hello" {
 		t.Fatalf("timestamped record lost: %+v %v", record, ok)
@@ -458,6 +476,8 @@ func TestTimestampedSanitizesAndPrefixes(t *testing.T) {
 }
 
 func TestByteBoundedProbeSemantics(t *testing.T) {
+	t.Parallel()
+
 	// Exact-ceiling response ends cleanly: the probe sees EOF, not truncation.
 	exact := &byteBounded{r: strings.NewReader("abcdef"), remaining: 6}
 	buf := make([]byte, 4)
@@ -484,6 +504,8 @@ func TestByteBoundedProbeSemantics(t *testing.T) {
 }
 
 func TestProjectionHelpersEdgeInputs(t *testing.T) {
+	t.Parallel()
+
 	if unixTimePtr(0) != nil || unixTimePtr(-5) != nil {
 		t.Fatal("non-positive timestamps must stay nil")
 	}
@@ -506,6 +528,8 @@ func TestProjectionHelpersEdgeInputs(t *testing.T) {
 }
 
 func TestObserverDetailPortParsingContinues(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	c := newTestClient(t, engine)
 	engine.set("detailports")
@@ -529,6 +553,8 @@ func TestObserverDetailPortParsingContinues(t *testing.T) {
 }
 
 func TestEngineInfoUnsupportedModesAreReported(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	c := newTestClient(t, engine)
 	engine.set("rootless")
@@ -542,6 +568,8 @@ func TestEngineInfoUnsupportedModesAreReported(t *testing.T) {
 }
 
 func TestNegotiateRefusesNonLinuxDaemons(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	newTestClient(t, engine)
 	engine.set("windows")
@@ -554,6 +582,8 @@ func TestNegotiateRefusesNonLinuxDaemons(t *testing.T) {
 }
 
 func TestEngineRefusalsMarkEveryOperation(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	c := newTestClient(t, engine)
 	ops := map[string]func() dockerobs.Response{
@@ -593,6 +623,8 @@ func TestEngineRefusalsMarkEveryOperation(t *testing.T) {
 }
 
 func TestVolumeListReportsTruncation(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	c := newTestClient(t, engine)
 	engine.set("manyvolumes")
@@ -606,12 +638,16 @@ func TestVolumeListReportsTruncation(t *testing.T) {
 }
 
 func TestDecodeListFirstTokenFailure(t *testing.T) {
+	t.Parallel()
+
 	if _, _, e := decodeList[struct{ N int }]([]byte("nope"), 10); e == nil || !strings.Contains(e.Error(), "malformed") {
 		t.Fatalf("garbage stream accepted: %v", e)
 	}
 }
 
 func TestAcceptSurfacesListenerErrors(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	l, e := net.Listen("unix", filepath.Join(dir, "o.sock"))
 	if e != nil {
@@ -635,6 +671,8 @@ func TestAcceptSurfacesListenerErrors(t *testing.T) {
 }
 
 func TestLogsMalformedStreamFailsClosed(t *testing.T) {
+	t.Parallel()
+
 	engine := newModeEngine(t)
 	c := newTestClient(t, engine)
 	engine.set("brokenlogs")

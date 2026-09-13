@@ -26,6 +26,8 @@ func stubRoot(t *testing.T, scripts map[string]string) string {
 }
 
 func TestCommandsRunExecutesAllowedTools(t *testing.T) {
+	t.Parallel()
+
 	root := stubRoot(t, map[string]string{
 		"systemctl":  `echo unit-ok`,
 		"journalctl": `echo -n "$@"`,
@@ -42,6 +44,8 @@ func TestCommandsRunExecutesAllowedTools(t *testing.T) {
 }
 
 func TestCommandsRunRejectsUnsupportedAndMissing(t *testing.T) {
+	t.Parallel()
+
 	root := stubRoot(t, map[string]string{"systemctl": "true"})
 	r := Commands{Limit: 4096, Root: root}
 	if _, e := r.Run(context.Background(), "rm"); e == nil || !strings.Contains(e.Error(), "unsupported executable") {
@@ -50,41 +54,14 @@ func TestCommandsRunRejectsUnsupportedAndMissing(t *testing.T) {
 	if _, e := r.Run(context.Background(), "dpkg-query"); e == nil || !strings.Contains(e.Error(), "collector unavailable") {
 		t.Fatalf("missing executable accepted: %v", e)
 	}
-}
-
-func TestCommandsRunReportsExitFailures(t *testing.T) {
-	root := stubRoot(t, map[string]string{"systemctl": "echo to-stderr >&2; exit 3"})
-	r := Commands{Limit: 4096, Root: root}
+	// A non-zero exit must surface as a failure.
+	root = stubRoot(t, map[string]string{"systemctl": "echo to-stderr >&2; exit 3"})
+	r = Commands{Limit: 4096, Root: root}
 	if _, e := r.Run(context.Background(), "systemctl"); e == nil {
 		t.Fatal("non-zero exit accepted")
 	}
-}
-
-func TestCommandsRunReportsInspectionCeiling(t *testing.T) {
-	root := stubRoot(t, map[string]string{"systemctl": "printf 'aaaaaaaaaaaaaaaaaaaa'"})
-	r := Commands{Limit: 4, Root: root}
-	if _, e := r.Run(context.Background(), "systemctl"); e == nil || !strings.Contains(e.Error(), "inspection limit exceeded") {
-		t.Fatalf("oversized output accepted: %v", e)
-	}
-}
-
-func TestCommandsRunBoundsHungProcess(t *testing.T) {
-	root := stubRoot(t, map[string]string{"systemctl": "sleep 30"})
-	r := Commands{Limit: 4096, Root: root}
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	_, e := r.Run(ctx, "systemctl")
-	if e == nil {
-		t.Fatal("hung process returned success")
-	}
-	if elapsed := time.Since(started); elapsed > 10*time.Second {
-		t.Fatalf("hang not bounded: %v", elapsed)
-	}
-}
-
-func TestCommandPathRejectsDirectoryAndEmptyRoot(t *testing.T) {
-	root := t.TempDir()
+	// The path resolution refuses directories and unknown names directly.
+	root = t.TempDir()
 	if e := os.MkdirAll(root+"/usr/bin/systemctl", 0755); e != nil {
 		t.Fatal(e)
 	}
@@ -96,7 +73,16 @@ func TestCommandPathRejectsDirectoryAndEmptyRoot(t *testing.T) {
 	}
 }
 
-func TestLimitedBufferClampsOversizedWrites(t *testing.T) {
+func TestCommandsRunReportsInspectionCeiling(t *testing.T) {
+	t.Parallel()
+
+	root := stubRoot(t, map[string]string{"systemctl": "printf 'aaaaaaaaaaaaaaaaaaaa'"})
+	r := Commands{Limit: 4, Root: root}
+	if _, e := r.Run(context.Background(), "systemctl"); e == nil || !strings.Contains(e.Error(), "inspection limit exceeded") {
+		t.Fatalf("oversized output accepted: %v", e)
+	}
+	// The clamping buffer behind the ceiling: exact fit stays clean, overflow
+	// is flagged and truncated.
 	b := &limitedBuffer{n: 8}
 	if _, e := b.Write([]byte("12345678")); e != nil {
 		t.Fatal(e)
@@ -113,5 +99,22 @@ func TestLimitedBufferClampsOversizedWrites(t *testing.T) {
 	empty := &limitedBuffer{n: 4}
 	if _, e := empty.Write([]byte("1234")); e != nil || empty.exceeded {
 		t.Fatalf("exact fit rejected: %v", empty.exceeded)
+	}
+}
+
+func TestCommandsRunBoundsHungProcess(t *testing.T) {
+	t.Parallel()
+
+	root := stubRoot(t, map[string]string{"systemctl": "sleep 30"})
+	r := Commands{Limit: 4096, Root: root}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, e := r.Run(ctx, "systemctl")
+	if e == nil {
+		t.Fatal("hung process returned success")
+	}
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Fatalf("hang not bounded: %v", elapsed)
 	}
 }

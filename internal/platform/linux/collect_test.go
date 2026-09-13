@@ -33,6 +33,8 @@ func fixture(t *testing.T) (*Collector, string) {
 	return &Collector{Config: cfg, Policy: p}, dir
 }
 func TestFileBoundaryAcrossTools(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	secret := filepath.Join(dir, "secret")
 	fixtureOK(t, os.WriteFile(secret, []byte("secret"), 0600))
@@ -55,6 +57,8 @@ func TestFileBoundaryAcrossTools(t *testing.T) {
 	}
 }
 func TestConfigSizeUTF8AndRealZeros(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	p := filepath.Join(dir, "config")
 	fixtureOK(t, os.WriteFile(p, []byte("zero: 0"), 0600))
@@ -74,6 +78,8 @@ func TestConfigSizeUTF8AndRealZeros(t *testing.T) {
 	}
 }
 func TestLogSemantics(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	p := filepath.Join(dir, "log")
 	fixtureOK(t, os.WriteFile(p, []byte(`{"timestamp":"2026-09-10T12:00:00Z","message":"warning is untrusted text","priority":3}`+"\n"+`{"message":"missing time"}`+"\n"), 0600))
@@ -100,8 +106,45 @@ func TestLogSemantics(t *testing.T) {
 	if r.Issues[0].Code != "unsupported_parser" {
 		t.Fatal(r)
 	}
+	// JSONL entries keep only explicit messages: absent, null, and invalid
+	// UTF-8 messages surface as issues instead of fabricated values.
+	path := filepath.Join(dir, "log")
+	content := `{"timestamp":"2026-09-10T12:00:00Z"}` + "\n" +
+		`{"timestamp":"2026-09-10T12:00:00Z","message":null}` + "\n" +
+		`{"timestamp":"2026-09-10T12:00:00Z","message":"` + string([]byte{0xff}) + `"}` + "\n" +
+		`{"timestamp":"2026-09-10T12:00:00Z","message":""}` + "\n"
+	fixtureOK(t, os.WriteFile(path, []byte(content), 0600))
+	r = c.Collect(context.Background(), "query_logs", contract.Args{Path: path, Format: "jsonl", Since: "2026-09-10T11:59:00Z", Until: "2026-09-10T12:01:00Z"})
+	entries, ok = r.Data["entries"].([]map[string]any)
+	if !ok || len(entries) != 1 || entries[0]["message"] != "" || len(r.Issues) != 2 || !strings.Contains(r.Issues[0].Message, "3 records") {
+		t.Fatalf("missing messages fabricated or explicit empty lost: %+v", r)
+	}
+	// Hardlinked sources stay denied without exposing the linked secret:
+	// protected pathnames may point at a mask rather than the same inode.
+	_, root := fixture(t)
+	fixtureOK(t, os.Mkdir(filepath.Join(root, "etc"), 0700))
+	secret := filepath.Join(root, "hidden")
+	alias := filepath.Join(root, "etc/os-release")
+	fixtureOK(t, os.WriteFile(secret, []byte("ID=SECRET\n"), 0600))
+	fixtureOK(t, os.Link(secret, alias))
+	// The protected pathname may refer to a mask rather than the linked inode.
+	c.Config.TokenStore = filepath.Join(root, "mask")
+	fixtureOK(t, os.WriteFile(c.Config.TokenStore, nil, 0600))
+	var err error
+	c.Policy, err = policy.CompileLinux(c.Config, "/configuration.yaml", nil)
+	fixtureOK(t, err)
+	if f, err := OpenRegular(alias, c.Policy); err == nil {
+		f.Close()
+		t.Fatal("hardlinked general source accepted")
+	}
+	if f, err := openObservation(root, "/etc/os-release", c.Policy, true); err == nil {
+		f.Close()
+		t.Fatal("hardlinked builtin source accepted")
+	}
 }
 func TestDistributionCapabilitiesWithoutVersionGate(t *testing.T) {
+	t.Parallel()
+
 	for _, osRelease := range []string{"ID=debian\nVERSION_ID=99\n", "ID=ubuntu\nVERSION_ID=99.99\n", "ID=arch\n"} {
 		c, dir := fixture(t)
 		c.Root = dir
@@ -123,6 +166,8 @@ func TestDistributionCapabilitiesWithoutVersionGate(t *testing.T) {
 	}
 }
 func TestTrustAndProfileLoading(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	cfg := config.DefaultsLinux(false)
 	cfg.ProfileDirs = []string{filepath.Join(dir, "profiles")}
@@ -143,6 +188,9 @@ func TestTrustAndProfileLoading(t *testing.T) {
 	}
 }
 func TestReplacementRaceFailsClosed(t *testing.T) {
+	// Serial on purpose: the covered fail-closed branch depends on a
+	// microscopic swap window between openat2 and the fd recheck; parallel
+	// load makes it vanish and would silently lose the assertion.
 	c, dir := fixture(t)
 	good := filepath.Join(dir, "good")
 	secret := filepath.Join(dir, "secret")
@@ -200,6 +248,8 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte
 	return []byte(f.out), f.err
 }
 func TestServicesExcludeBodiesAndPaginate(t *testing.T) {
+	t.Parallel()
+
 	c, _ := fixture(t)
 	f := &fakeRunner{out: "a.service loaded active running description\nb.service loaded failed failed desc\n"}
 	c.Runner = f
@@ -218,6 +268,8 @@ func TestServicesExcludeBodiesAndPaginate(t *testing.T) {
 	}
 }
 func TestHealthIncompletePreservesWarning(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	c.Root = dir
 	c.Config.Health.Sample = time.Millisecond
@@ -232,12 +284,16 @@ func TestHealthIncompletePreservesWarning(t *testing.T) {
 }
 
 func TestMissingSourceIsNotContainment(t *testing.T) {
+	t.Parallel()
+
 	if e := SecretIsMasked(filepath.Join(t.TempDir(), "absent-secret")); e == nil {
 		t.Fatal("arbitrary absent path accepted as credential isolation")
 	}
 }
 
 func TestMandatoryLiteralSourcesAcrossReaders(t *testing.T) {
+	t.Parallel()
+
 	for _, name := range []string{"config[1]", "token*", `key\literal`, "profile?"} {
 		for _, kind := range []string{"config", "token", "key", "profile"} {
 			t.Run(kind+"/"+name, func(t *testing.T) {
@@ -281,6 +337,8 @@ func TestMandatoryLiteralSourcesAcrossReaders(t *testing.T) {
 }
 
 func TestBuiltinDescriptorBoundaryAndReplacement(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	for _, dir := range []string{"etc", "usr/lib", "proc/sys/kernel"} {
@@ -357,12 +415,15 @@ func TestBuiltinDescriptorBoundaryAndReplacement(t *testing.T) {
 }
 
 func TestMalformedJSONLBoundedIssuesAndCancellation(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
+	c.Config.Limits.InspectionBytes = 4096
 	path := filepath.Join(dir, "malformed.log")
 	fixtureOK(t, os.WriteFile(path, []byte(strings.Repeat("x\n", c.Config.Limits.InspectionBytes/2)), 0600))
 	r := c.Collect(context.Background(), "query_logs", contract.Args{Path: path, Format: "jsonl"})
 	b, err := json.Marshal(r)
-	if err != nil || len(b) > 4096 || len(r.Issues) != 2 || !strings.Contains(r.Issues[0].Message, "524288 records") || r.Data["coverage_complete"] != false {
+	if err != nil || len(b) > 4096 || len(r.Issues) != 2 || !strings.Contains(r.Issues[0].Message, "2048 records") || r.Data["coverage_complete"] != false {
 		t.Fatal("unbounded or dishonest parsing result", len(b), r.Issues)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -375,6 +436,8 @@ func TestMalformedJSONLBoundedIssuesAndCancellation(t *testing.T) {
 }
 
 func TestBuiltinProcAndMandatoryObjectProtection(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	for _, path := range []string{"/proc/meminfo", "/proc/self/mounts", "/proc/sys/kernel/osrelease"} {
 		b, err := c.file(path, true)

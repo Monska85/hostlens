@@ -16,6 +16,8 @@ import (
 )
 
 func TestConfigurationReadBoundsAndTypes(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	fixtureOK(t, os.WriteFile(path, []byte(strings.Repeat(" ", 1<<20)+"x"), 0600))
@@ -44,6 +46,8 @@ func TestConfigurationReadBoundsAndTypes(t *testing.T) {
 }
 
 func TestRawTailRecordBoundaries(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name, content string
 		limit         int
@@ -69,31 +73,9 @@ func TestRawTailRecordBoundaries(t *testing.T) {
 	}
 }
 
-func TestHardlinkedSourcesRemainDeniedWithoutVisibleSecret(t *testing.T) {
-	c, root := fixture(t)
-	c.Root = root
-	fixtureOK(t, os.Mkdir(filepath.Join(root, "etc"), 0700))
-	secret := filepath.Join(root, "hidden")
-	alias := filepath.Join(root, "etc/os-release")
-	fixtureOK(t, os.WriteFile(secret, []byte("ID=SECRET\n"), 0600))
-	fixtureOK(t, os.Link(secret, alias))
-	// The protected pathname may refer to a mask rather than the linked inode.
-	c.Config.TokenStore = filepath.Join(root, "mask")
-	fixtureOK(t, os.WriteFile(c.Config.TokenStore, nil, 0600))
-	var err error
-	c.Policy, err = policy.CompileLinux(c.Config, "/configuration.yaml", nil)
-	fixtureOK(t, err)
-	if f, err := OpenRegular(alias, c.Policy); err == nil {
-		f.Close()
-		t.Fatal("hardlinked general source accepted")
-	}
-	if f, err := openObservation(root, "/etc/os-release", c.Policy, true); err == nil {
-		f.Close()
-		t.Fatal("hardlinked builtin source accepted")
-	}
-}
-
 func TestJournalUnsupportedFieldsAreExplicitAndBounded(t *testing.T) {
+	t.Parallel()
+
 	c, _ := fixture(t)
 	c.Config.Allow.Journal = []string{"app.service"}
 	var err error
@@ -118,6 +100,8 @@ func (r cancellingServiceRunner) Run(context.Context, string, ...string) ([]byte
 }
 
 func TestCancelledServiceParsingCannotReportHealthy(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	c.Config.Health.Required = []string{"services"}
@@ -131,6 +115,8 @@ func TestCancelledServiceParsingCannotReportHealthy(t *testing.T) {
 }
 
 func TestRawTailUsesObservedEnd(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "log")
 	fixtureOK(t, os.WriteFile(path, []byte("old\nlast\n"), 0600))
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -150,22 +136,9 @@ func TestRawTailUsesObservedEnd(t *testing.T) {
 	}
 }
 
-func TestJSONLPreservesExplicitMessagesOnly(t *testing.T) {
-	c, dir := fixture(t)
-	path := filepath.Join(dir, "log")
-	content := `{"timestamp":"2026-09-10T12:00:00Z"}` + "\n" +
-		`{"timestamp":"2026-09-10T12:00:00Z","message":null}` + "\n" +
-		`{"timestamp":"2026-09-10T12:00:00Z","message":"` + string([]byte{0xff}) + `"}` + "\n" +
-		`{"timestamp":"2026-09-10T12:00:00Z","message":""}` + "\n"
-	fixtureOK(t, os.WriteFile(path, []byte(content), 0600))
-	r := c.Collect(context.Background(), "query_logs", contract.Args{Path: path, Format: "jsonl", Since: "2026-09-10T11:59:00Z", Until: "2026-09-10T12:01:00Z"})
-	entries, ok := r.Data["entries"].([]map[string]any)
-	if !ok || len(entries) != 1 || entries[0]["message"] != "" || len(r.Issues) != 2 || !strings.Contains(r.Issues[0].Message, "3 records") {
-		t.Fatalf("missing messages fabricated or explicit empty lost: %+v", r)
-	}
-}
-
 func TestCapabilitiesRequireMatchingExecutables(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	for _, dir := range []string{"run/systemd/system", "var/lib/dpkg", "var/lib/pacman/local", "usr/bin"} {

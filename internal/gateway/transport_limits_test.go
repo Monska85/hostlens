@@ -14,6 +14,8 @@ import (
 )
 
 func TestOriginAndRequestBodyLimits(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	cfg.Limits.RequestBytes = 256
 	cfg.Limits.Concurrent = 1

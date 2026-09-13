@@ -6,6 +6,8 @@ import (
 )
 
 func TestMeasuredResponseFlushWritesImplicitStatus(t *testing.T) {
+	t.Parallel()
+
 	rec := httptest.NewRecorder()
 	measured := &measuredResponse{ResponseWriter: rec}
 	measured.Flush()
@@ -23,6 +25,8 @@ func TestMeasuredResponseFlushWritesImplicitStatus(t *testing.T) {
 }
 
 func TestMeasuredResponseWriteHeaderWinsOnce(t *testing.T) {
+	t.Parallel()
+
 	rec := httptest.NewRecorder()
 	measured := &measuredResponse{ResponseWriter: rec}
 	measured.WriteHeader(201)
@@ -37,6 +41,8 @@ func TestMeasuredResponseWriteHeaderWinsOnce(t *testing.T) {
 }
 
 func TestMeasuredResponseWriteImpliesSuccess(t *testing.T) {
+	t.Parallel()
+
 	rec := httptest.NewRecorder()
 	measured := &measuredResponse{ResponseWriter: rec}
 	if _, e := measured.Write([]byte("body")); e != nil {
@@ -48,6 +54,8 @@ func TestMeasuredResponseWriteImpliesSuccess(t *testing.T) {
 }
 
 func TestMCPEnvelopesAcceptArrayObjectAndRejectGarbage(t *testing.T) {
+	t.Parallel()
+
 	array, e := mcpEnvelopes([]byte(`[{"id":1,"method":"tools/call","params":{"name":"get_os_info"}},{"id":2,"method":"tools/list"}]`))
 	if e != nil || len(array) != 2 || array[0].Method != "tools/call" || array[1].Params.Name != "" {
 		t.Fatalf("array envelopes lost: %v %v", array, e)

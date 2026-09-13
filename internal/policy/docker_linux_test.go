@@ -104,12 +104,8 @@ func TestDockerActiveKinds(t *testing.T) {
 	if len(p.ActiveKinds("docker")) != len(dockerCollections)+len(dockerItems) {
 		t.Fatal("wildcard must cover every docker class")
 	}
-}
-
-func TestDockerFingerprintReactsToPolicyChange(t *testing.T) {
-	a := dockerPolicy(t, []string{"containers"}, []string{})
-	b := dockerPolicy(t, []string{"containers", "logs/*"}, []string{})
-	if a.Fingerprint() == b.Fingerprint() {
+	// The fingerprint must react to a docker policy change.
+	if dockerPolicy(t, []string{"containers"}, []string{}).Fingerprint() == dockerPolicy(t, []string{"containers", "logs/*"}, []string{}).Fingerprint() {
 		t.Fatal("fingerprint must react to docker policy change")
 	}
 }

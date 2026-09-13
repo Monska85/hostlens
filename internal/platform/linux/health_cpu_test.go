@@ -10,6 +10,8 @@ import (
 )
 
 func TestCpuParseValidLine(t *testing.T) {
+	t.Parallel()
+
 	line := []byte("cpu  100 0 50 850 0 0 0 0 0 0\ncpu0 10 0 5 85 0 0 0 0 0 0\n")
 	total, idle, e := cpu(line)
 	if e != nil {
@@ -26,39 +28,43 @@ func TestCpuParseValidLine(t *testing.T) {
 	if idle != 850 {
 		t.Fatalf("idle share lost: %v", idle)
 	}
-}
-
-func TestCpuParseFieldsCappedAtEight(t *testing.T) {
 	// Nine counters: the ninth must be ignored by the fixed cap.
-	line := "cpu  1 1 1 1 1 1 1 1 99\n"
-	total, idle, e := cpu([]byte(line))
+	total, idle, e = cpu([]byte("cpu  1 1 1 1 1 1 1 1 99\n"))
 	if e != nil {
 		t.Fatal(e)
 	}
 	if total != 8 || idle != 2 {
 		t.Fatalf("field cap broken: total=%v idle=%v", total, idle)
 	}
+	// A static /proc/stat line must stay parseable: the health fixture is
+	// guarded against regressing to non-advancing counters.
+	if _, _, e := cpu([]byte("cpu  5 0 0 0 0 0 0 0\n")); e != nil {
+		t.Fatal(e)
+	}
 }
 
 func TestCpuParseMalformedFloat(t *testing.T) {
+	t.Parallel()
+
 	if _, _, e := cpu([]byte("cpu  1 x 1 1 1 1\n")); e == nil {
 		t.Fatal("malformed counter accepted")
 	}
-}
-
-func TestCpuParseMissingAggregateLine(t *testing.T) {
-	if _, _, e := cpu([]byte("cpu0 1 2 3 4 5\nintr 1\n")); e == nil || !strings.Contains(e.Error(), "absent") {
-		t.Fatalf("missing aggregate line accepted: %v", e)
-	}
-}
-
-func TestCpuParseShortFieldsIgnored(t *testing.T) {
 	if _, _, e := cpu([]byte("cpu  1 2\n")); e == nil {
 		t.Fatal("short cpu line accepted")
 	}
 }
 
+func TestCpuParseMissingAggregateLine(t *testing.T) {
+	t.Parallel()
+
+	if _, _, e := cpu([]byte("cpu0 1 2 3 4 5\nintr 1\n")); e == nil || !strings.Contains(e.Error(), "absent") {
+		t.Fatalf("missing aggregate line accepted: %v", e)
+	}
+}
+
 func TestGetHealthSnapshotCoversCpu(t *testing.T) {
+	t.Parallel()
+
 	c := collectorWith(t, nil, nil, nil)
 	c.Config.Health.Sample = 10 * time.Millisecond
 	c.Config.Health.Required = []string{"cpu"}
@@ -79,17 +85,5 @@ func TestGetHealthSnapshotCoversCpu(t *testing.T) {
 	}
 	if _, ok := result.Data["cpu_utilization_percent"].(float64); !ok {
 		t.Fatalf("cpu utilization missing: %v", result.Data["cpu_utilization_percent"])
-	}
-}
-
-func TestHealthCpuResetCountersFailClosed(t *testing.T) {
-	c := collectorWith(t, nil, nil, nil)
-	c.Config.Health.Sample = 10 * time.Millisecond
-	c.Config.Health.Required = []string{"cpu"}
-	// A static /proc/stat would violate the monotonically increasing sample
-	// pair; the fixture must produce real advancing counters, so this is
-	// only a guard against regression in the fixture path.
-	if _, _, e := cpu([]byte("cpu  5 0 0 0 0 0 0 0\n")); e != nil {
-		t.Fatal(e)
 	}
 }

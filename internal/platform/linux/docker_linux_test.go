@@ -91,6 +91,8 @@ func engineResponse(t *testing.T) *dockerobs.EngineInfo {
 }
 
 func TestDockerInfoAvailableAndUnsupportedModes(t *testing.T) {
+	t.Parallel()
+
 	info := dockerobs.EngineInfo{ServerVersion: "28.0.0", NegotiatedAPI: "1.51", MinAPI: "1.44"}
 	c := collectorWith(t, []string{"daemon"}, nil, &fakeObserver{responses: map[string]dockerobs.Response{
 		dockerobs.OpEngineInfo: {Engine: &info},
@@ -118,6 +120,8 @@ func TestDockerInfoAvailableAndUnsupportedModes(t *testing.T) {
 }
 
 func TestDockerDisabledAndUnavailable(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(true)
 	p, e := policy.CompileLinux(config.Config{}, "/x", nil)
 	if e != nil {
@@ -142,6 +146,8 @@ func TestDockerDisabledAndUnavailable(t *testing.T) {
 // observation is not discarded by the backend response ceiling: the page
 // clamps and hands the client a next offset instead.
 func TestDockerDefaultPageFitsTheResponseBudget(t *testing.T) {
+	t.Parallel()
+
 	items := make([]dockerobs.ContainerSummary, 0, 300)
 	for i := range 300 {
 		items = append(items, summary(id64For(i+100), fmt.Sprintf("svc-%d", i), "running"))
@@ -177,6 +183,8 @@ func mustJSONBytes(r contract.Result) []byte {
 }
 
 func TestDockerUngrantedCallsNeverReachTheObserver(t *testing.T) {
+	t.Parallel()
+
 	for _, tool := range []string{
 		"get_docker_info", "list_docker_containers", "get_docker_container",
 		"get_docker_container_stats", "list_docker_images", "list_docker_volumes",
@@ -223,6 +231,8 @@ func TestDockerUngrantedCallsNeverReachTheObserver(t *testing.T) {
 // TestDockerDiskUsageFiltersDeniedContainers proves that denied containers
 // contribute neither their inventory row nor their stopped-container ID.
 func TestDockerDiskUsageFiltersDeniedContainers(t *testing.T) {
+	t.Parallel()
+
 	containers := []dockerobs.ContainerSummary{summary(stoppedID, "db", "exited")}
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary { return containers },
@@ -249,6 +259,8 @@ func TestDockerDiskUsageFiltersDeniedContainers(t *testing.T) {
 // TestDockerImageTagAndNetworkNameDenialsApply proves that deny rules
 // written through practical name forms exclude inventory items.
 func TestDockerImageTagAndNetworkNameDenialsApply(t *testing.T) {
+	t.Parallel()
+
 	image := dockerobs.ImageSummary{ID: "sha256:" + imageID(5), RepoTags: []string{"secretimg:1"}}
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary { return nil },
@@ -277,6 +289,8 @@ func TestDockerImageTagAndNetworkNameDenialsApply(t *testing.T) {
 }
 
 func TestContainerListFiltersDeniedAndPages(t *testing.T) {
+	t.Parallel()
+
 	observer := &fakeObserver{containers: func() []dockerobs.ContainerSummary {
 		return []dockerobs.ContainerSummary{
 			summary(runningID, "web", "running"),
@@ -309,6 +323,8 @@ func TestContainerListFiltersDeniedAndPages(t *testing.T) {
 }
 
 func TestDockerContainerDetailAndNameReuse(t *testing.T) {
+	t.Parallel()
+
 	detail := &dockerobs.ContainerDetail{ContainerSummary: summary(runningID, "web", "running"), HealthCheck: "configured"}
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {
@@ -349,6 +365,8 @@ func TestDockerContainerDetailAndNameReuse(t *testing.T) {
 }
 
 func TestDockerStatsHonestUnavailableFields(t *testing.T) {
+	t.Parallel()
+
 	stats := &dockerobs.ContainerStats{Read: time.Now().UTC(), CPUPercent: floatPtr(12.5)}
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {
@@ -387,6 +405,8 @@ func TestDockerStatsHonestUnavailableFields(t *testing.T) {
 }
 
 func TestUnusedAnalysisRespectsStoppedReferences(t *testing.T) {
+	t.Parallel()
+
 	image := dockerobs.ImageSummary{ID: "sha256:" + imageID(1), Size: int64Ptr(100), SharedSize: int64Ptr(40)}
 	volume := dockerobs.VolumeSummary{Name: "data", Driver: "local"}
 	// The stopped container still references both resources.
@@ -427,24 +447,24 @@ func TestUnusedAnalysisRespectsStoppedReferences(t *testing.T) {
 	if _, ok := result.Data["unused_since"]; ok {
 		t.Fatal("creation time must never become unused duration")
 	}
-}
-
-func TestDanglingDistinctFromUnused(t *testing.T) {
-	observer := &fakeObserver{
+	// The daemon's dangling fact must stay visible next to the unused fact.
+	observer = &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary { return nil },
 		responses: map[string]dockerobs.Response{
 			dockerobs.OpImageList: {Images: []dockerobs.ImageSummary{{ID: "sha256:" + imageID(9), Dangling: true}}},
 		},
 	}
-	c := collectorWith(t, []string{"images"}, nil, observer)
-	result := c.Collect(context.Background(), "list_docker_images", contract.Args{})
-	items := result.Data["items"].([]map[string]any)
+	c = collectorWith(t, []string{"images"}, nil, observer)
+	result = c.Collect(context.Background(), "list_docker_images", contract.Args{})
+	items = result.Data["items"].([]map[string]any)
 	if items[0]["dangling"] != true || items[0]["currently_unused"] != true {
 		t.Fatal("dangling and unused facts must both be visible")
 	}
 }
 
 func TestRaceSuppressesUnusedCertainty(t *testing.T) {
+	t.Parallel()
+
 	sequence := 0
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {
@@ -479,6 +499,8 @@ func TestRaceSuppressesUnusedCertainty(t *testing.T) {
 }
 
 func TestDiskUsageReclaimableAdvisory(t *testing.T) {
+	t.Parallel()
+
 	containers := []dockerobs.ContainerSummary{summary(stoppedID, "old", "exited")}
 	containers[0].ImageID = "sha256:" + imageID(1)
 	observer := &fakeObserver{
@@ -526,6 +548,8 @@ func TestDiskUsageReclaimableAdvisory(t *testing.T) {
 }
 
 func TestDockerLogsBoundedAndDriverGap(t *testing.T) {
+	t.Parallel()
+
 	page := &dockerobs.LogPage{Records: []dockerobs.LogRecord{{Stream: "stdout", Message: "line"}}, Truncated: true}
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {
@@ -565,6 +589,8 @@ func TestDockerLogsBoundedAndDriverGap(t *testing.T) {
 }
 
 func TestDockerMutationShapedArgumentsRejected(t *testing.T) {
+	t.Parallel()
+
 	observer := &fakeObserver{}
 	c := collectorWith(t, []string{"*"}, nil, observer)
 	before := len(observer.requests)
@@ -584,6 +610,8 @@ func TestDockerMutationShapedArgumentsRejected(t *testing.T) {
 }
 
 func TestDockerGrantCannotMutate(t *testing.T) {
+	t.Parallel()
+
 	observer := &fakeObserver{containers: func() []dockerobs.ContainerSummary { return nil }}
 	c := collectorWith(t, []string{"*"}, nil, observer)
 	// Every registered Docker tool is a diagnostic effect; the registry has
@@ -626,6 +654,8 @@ func intPtr(v int) *int { return &v }
 func int64Ptr(v int64) *int64 { return &v }
 
 func TestDockerCollectorAdmitsBoundedConcurrentWork(t *testing.T) {
+	t.Parallel()
+
 	var mu sync.Mutex
 	observer := &fakeObserver{}
 	observer.containers = func() []dockerobs.ContainerSummary {
@@ -655,6 +685,8 @@ func TestDockerCollectorAdmitsBoundedConcurrentWork(t *testing.T) {
 // capabilities on disabled, ungranted, or observer-unreachable states while
 // unrelated tools stay discoverable.
 func TestCollectorCapabilitiesOmitDockerWhenDisabled(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(true)
 	p, e := policy.CompileLinux(config.Config{}, "/x", nil)
 	if e != nil {
@@ -688,6 +720,8 @@ func TestCollectorCapabilitiesOmitDockerWhenDisabled(t *testing.T) {
 }
 
 func TestDockerCapabilitiesFollowGrantsAndObserver(t *testing.T) {
+	t.Parallel()
+
 	observer := &fakeObserver{responses: map[string]dockerobs.Response{
 		dockerobs.OpEngineInfo: {Engine: &dockerobs.EngineInfo{ServerVersion: "28.0.0", NegotiatedAPI: "1.51", MinAPI: "1.44"}},
 	}}
@@ -721,6 +755,8 @@ func TestDockerCapabilitiesFollowGrantsAndObserver(t *testing.T) {
 }
 
 func TestDockerEvidenceNeverRetained(t *testing.T) {
+	t.Parallel()
+
 	const marker = "sensitive-docker-evidence-7d3f2b"
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {

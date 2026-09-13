@@ -85,6 +85,8 @@ func parseMetrics(t *testing.T, w *httptest.ResponseRecorder) map[string]*dto.Me
 	return f
 }
 func TestMetricsHTTPAuthorizationAndLifecycle(t *testing.T) {
+	t.Parallel()
+
 	c, _, store := metricsCoordinator(t)
 	for _, tc := range []struct {
 		method, auth string
@@ -176,8 +178,42 @@ func TestMetricsHTTPAuthorizationAndLifecycle(t *testing.T) {
 			t.Fatal("disabled route precedence")
 		}
 	}
+	// Reload applies metric access atomically and a failed reload keeps the
+	// previous access level.
+	candidate := c.Active
+	c.Load = func() (backend.Snapshot, error) { return candidate, nil }
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})}
+	c.Active.Config.Server.TrustedProxies = nil
+	candidate.Config.Metrics.Enabled = true
+	candidate.Config.Metrics.AllowAnonymous = true
+	candidate.Config.Server.TrustedProxies = nil
+	if err := c.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	parseMetrics(t, scrapeRequest(c, "GET", ""))
+	waitScrape(t, c)
+	candidate.Config.Metrics.AllowAnonymous = false
+	if err := c.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if w := scrapeRequest(c, "GET", ""); w.Code != 401 {
+		t.Fatal("access transition failed")
+	}
+	waitScrape(t, c)
+	c.Load = func() (backend.Snapshot, error) { return backend.Snapshot{}, errors.New("invalid config") }
+	if c.Reload(context.Background()) == nil {
+		t.Fatal("invalid reload accepted")
+	}
+	if w := scrapeRequest(c, "GET", ""); w.Code != 401 {
+		t.Fatal("failed reload changed access")
+	}
+	waitScrape(t, c)
 }
 func TestMetricsOnlyCannotDiscoverOrExecuteTools(t *testing.T) {
+	t.Parallel()
+
 	c, _, store := metricsCoordinator(t)
 	_, secret, err := store.Create("scraper", []string{"metrics"}, time.Now().Add(time.Hour))
 	if err != nil {
@@ -212,6 +248,8 @@ func TestMetricsOnlyCannotDiscoverOrExecuteTools(t *testing.T) {
 	}
 }
 func TestMetricsAdmissionCancellationAndSnapshot(t *testing.T) {
+	t.Parallel()
+
 	c, _, _ := metricsCoordinator(t)
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -300,37 +338,9 @@ func TestMetricsBackendFailuresAndGenerationIsolation(t *testing.T) {
 	}
 	waitScrape(t, c)
 }
-func TestMetricsReloadAtomicity(t *testing.T) {
-	c, _, _ := metricsCoordinator(t)
-	candidate := c.Active
-	c.Load = func() (backend.Snapshot, error) { return candidate, nil }
-	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
-	})}
-	candidate.Config.Metrics.AllowAnonymous = true
-	if err := c.Reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	parseMetrics(t, scrapeRequest(c, "GET", ""))
-	waitScrape(t, c)
-	candidate.Config.Metrics.AllowAnonymous = false
-	if err := c.Reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if w := scrapeRequest(c, "GET", ""); w.Code != 401 {
-		t.Fatal("access transition failed")
-	}
-	waitScrape(t, c)
-	c.Load = func() (backend.Snapshot, error) { return backend.Snapshot{}, errors.New("invalid config") }
-	if c.Reload(context.Background()) == nil {
-		t.Fatal("invalid reload accepted")
-	}
-	if w := scrapeRequest(c, "GET", ""); w.Code != 401 {
-		t.Fatal("failed reload changed access")
-	}
-	waitScrape(t, c)
-}
 func TestScrapeStormAllowsMCPProgress(t *testing.T) {
+	t.Parallel()
+
 	c, _, _ := metricsCoordinator(t)
 	c.Active.Config.Metrics.AllowAnonymous = true
 	c.Tokens = verifyFunc(func(string) (token.Record, error) { return token.Record{Roles: []string{"health"}}, nil })
@@ -379,6 +389,8 @@ func TestScrapeStormAllowsMCPProgress(t *testing.T) {
 }
 
 func TestAdmittedScrapeFinishesOriginalSnapshot(t *testing.T) {
+	t.Parallel()
+
 	c, _, _ := metricsCoordinator(t)
 	c.Active.Config.Metrics.AllowAnonymous = true
 	entered := make(chan struct{})
@@ -406,6 +418,7 @@ func TestAdmittedScrapeFinishesOriginalSnapshot(t *testing.T) {
 func TestMetricsUnreadBodyHasScrapeDeadline(t *testing.T) {
 	for _, anonymous := range []bool{false, true} {
 		t.Run(fmt.Sprint(anonymous), func(t *testing.T) {
+			t.Parallel()
 			c, _, _ := metricsCoordinator(t)
 			c.Active.Config.Metrics.AllowAnonymous = anonymous
 			completed := make(chan struct{})
@@ -432,6 +445,8 @@ func TestMetricsUnreadBodyHasScrapeDeadline(t *testing.T) {
 }
 
 func TestMetricsAuditExcludesCredentials(t *testing.T) {
+	t.Parallel()
+
 	c, _, store := metricsCoordinator(t)
 	var logs bytes.Buffer
 	c.Log = slog.New(slog.NewJSONHandler(&logs, nil))

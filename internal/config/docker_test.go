@@ -1,8 +1,6 @@
 package config
 
 import (
-	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -23,15 +21,39 @@ func TestDockerEnabledDefaultsValidate(t *testing.T) {
 	if e := ValidateLinux(dockerConfig(nil)); e != nil {
 		t.Fatal(e)
 	}
-}
-
-func TestDockerOmittedStartsWithoutAuthority(t *testing.T) {
-	c := DefaultsLinux(true)
-	if e := ValidateLinux(c); e != nil {
+	// An omitted docker section starts without authority and still validates.
+	omitted := DefaultsLinux(true)
+	if e := ValidateLinux(omitted); e != nil {
 		t.Fatal(e)
 	}
-	if c.Docker.Enabled {
+	if omitted.Docker.Enabled {
 		t.Fatal("docker must default to disabled")
+	}
+	// Disabled docker carries no authority even with sockets configured.
+	disabled := dockerConfig(func(c *Config) { c.Docker.Enabled = false })
+	if e := ValidateLinux(disabled); e != nil {
+		t.Fatal(e)
+	}
+	// Docker policy rides the shared profile rules and stays reloadable.
+	policy := dockerConfig(nil)
+	policy.Profile.Allow.Docker = []string{"containers"}
+	if e := ValidateLinux(policy); e != nil {
+		t.Fatal(e)
+	}
+	// User and system defaults validate and differ in authority identity.
+	user := DefaultsLinux(false)
+	system := DefaultsLinux(true)
+	if e := ValidateLinux(user); e != nil {
+		t.Fatalf("user defaults rejected: %v", e)
+	}
+	if e := ValidateLinux(system); e != nil {
+		t.Fatalf("system defaults rejected: %v", e)
+	}
+	if user.Mode == system.Mode || user.Privilege == system.Privilege {
+		t.Fatalf("user and system defaults must differ: %+v vs %+v", user, system)
+	}
+	if user.GatewayUser == system.GatewayUser && system.GatewayUser != "" {
+		t.Fatal("system must pin the gateway identity")
 	}
 }
 
@@ -111,41 +133,6 @@ func TestDockerRequiresSystemMode(t *testing.T) {
 	}
 }
 
-func TestDockerDisabledCarriesNoAuthority(t *testing.T) {
-	c := dockerConfig(func(c *Config) { c.Docker.Enabled = false })
-	if e := ValidateLinux(c); e != nil {
-		t.Fatal(e)
-	}
-}
-
-func TestDockerSettingsAreRestartOnly(t *testing.T) {
-	// The gateway restart fingerprint includes the whole docker section;
-	// verify value-level differences through marshaled equality.
-	a := dockerConfig(nil)
-	b := dockerConfig(func(c *Config) { c.Docker.Group = "other" })
-	if mustEqual(a.Docker, b.Docker) {
-		t.Fatal("docker topology settings must differ for the restart fingerprint")
-	}
-	if a.Limits.PageSize != b.Limits.PageSize {
-		t.Fatal("unrelated limits must not differ")
-	}
-}
-
-func mustEqual(a, b any) bool {
-	am, _ := json.Marshal(a)
-	bm, _ := json.Marshal(b)
-	return bytes.Equal(am, bm)
-}
-
-func TestDockerReloadablePolicyRemainsPolicy(t *testing.T) {
-	// Docker policy rides the shared profile rules and stays reloadable.
-	c := dockerConfig(nil)
-	c.Profile.Allow.Docker = []string{"containers"}
-	if e := ValidateLinux(c); e != nil {
-		t.Fatal(e)
-	}
-}
-
 func TestValidateLinuxIdentityNamesAreFixed(t *testing.T) {
 	c := dockerConfig(func(c *Config) { c.GatewayUser = "someone-else" })
 	if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "fixed") {
@@ -205,22 +192,5 @@ func TestValidateLinuxProfileTokenSocketPathsMustBeAbsoluteAndClean(t *testing.T
 	c.AdminSocket = "/run/x//admin.sock"
 	if e := ValidateLinux(c); e == nil {
 		t.Fatalf("unclean admin socket accepted")
-	}
-}
-
-func TestValidateLinuxUserAndSystemDefaultsDiffer(t *testing.T) {
-	user := DefaultsLinux(false)
-	system := DefaultsLinux(true)
-	if e := ValidateLinux(user); e != nil {
-		t.Fatalf("user defaults rejected: %v", e)
-	}
-	if e := ValidateLinux(system); e != nil {
-		t.Fatalf("system defaults rejected: %v", e)
-	}
-	if user.Mode == system.Mode || user.Privilege == system.Privilege {
-		t.Fatalf("user and system defaults must differ: %+v vs %+v", user, system)
-	}
-	if user.GatewayUser == system.GatewayUser && system.GatewayUser != "" {
-		t.Fatalf("system must pin the gateway identity")
 	}
 }

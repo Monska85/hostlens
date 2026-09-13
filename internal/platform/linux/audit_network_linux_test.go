@@ -10,6 +10,8 @@ import (
 )
 
 func TestProcNetworkAddressOrder(t *testing.T) {
+	t.Parallel()
+
 	// proc socket addresses print each native u32 as hexadecimal, including IPv6.
 	ipv4 := "0100007F"
 	ipv6 := "00000000000000000000000001000000"
@@ -34,6 +36,8 @@ func TestProcNetworkAddressOrder(t *testing.T) {
 	}
 }
 func TestSocketFilteringAndMalformedRows(t *testing.T) {
+	t.Parallel()
+
 	header := "sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
 	listener := "0: 00000000:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 987\n"
 	connected := "1: 00000000:1234 00000000:4321 01 00000000:00000000 00:00000000 00000000 1000 0 988\n"
@@ -52,6 +56,8 @@ func TestSocketFilteringAndMalformedRows(t *testing.T) {
 	}
 }
 func TestNativeNetworkParsers(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name, good, bad string
 		parse           func([]byte) ([]map[string]any, error)
@@ -75,6 +81,8 @@ func TestNativeNetworkParsers(t *testing.T) {
 	}
 }
 func TestNetworkCoverageDenialsAndBounds(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	c.Root = dir
 	writeAuditFixture(t, c, "/proc/net/tcp", "sl local_address\n0: 00000000:1538 00000000:0000 0A 0 0 0 1000 0 987\n")
@@ -92,6 +100,8 @@ func TestNetworkCoverageDenialsAndBounds(t *testing.T) {
 }
 
 func TestNetworkOversizedSourceStopsFurtherCollection(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	writeAuditFixture(t, c, "/proc/net/dev", strings.Repeat("x", 65))

@@ -16,6 +16,8 @@ import (
 )
 
 func TestListenIPCRefusesNonSocketResources(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	regular := filepath.Join(dir, "regular")
 	if e := os.WriteFile(regular, []byte("x"), 0644); e != nil {
@@ -33,6 +35,8 @@ func TestListenIPCRefusesNonSocketResources(t *testing.T) {
 }
 
 func TestListenIPCRefusesLiveInstance(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "observer.sock")
 	l, e := net.Listen("unix", path)
@@ -46,6 +50,8 @@ func TestListenIPCRefusesLiveInstance(t *testing.T) {
 }
 
 func TestListenIPCRemovesStaleSocketAndBinds(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "observer.sock")
 	l, e := net.Listen("unix", path)
@@ -74,6 +80,8 @@ func TestListenIPCRemovesStaleSocketAndBinds(t *testing.T) {
 }
 
 func TestListenIPCRefusesForeignOwnedSocket(t *testing.T) {
+	t.Parallel()
+
 	if os.Getuid() != 0 {
 		t.Skip("foreign-owner refusal requires root")
 	}
@@ -93,6 +101,8 @@ func TestListenIPCRefusesForeignOwnedSocket(t *testing.T) {
 }
 
 func TestListenIPCHandlesSocketChangedDuringCheck(t *testing.T) {
+	t.Parallel()
+
 	// The stale-instance check re-verifies the same file after the failed
 	// dial; a concurrent replacement must be refused. The race window is
 	// microscopic, so both the defensive refusal and the clean success are
@@ -231,7 +241,7 @@ func TestListenInheritedAdoptsSocketActivation(t *testing.T) {
 		if dialErr == nil {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
 	if dialErr != nil {
 		cmd.Process.Kill()
@@ -258,6 +268,8 @@ func TestListenInheritedAdoptsSocketActivation(t *testing.T) {
 }
 
 func TestHandlerRejectsWrongMethodAndUnknownPaths(t *testing.T) {
+	t.Parallel()
+
 	engine := newRecordingEngine(t)
 	s := NewServer(engine.path, 0)
 	defer s.Close()
@@ -285,6 +297,8 @@ func TestHandlerRejectsWrongMethodAndUnknownPaths(t *testing.T) {
 }
 
 func TestResolveIdentitiesFromSystemFiles(t *testing.T) {
+	t.Parallel()
+
 	uid, e := resolveUID("root")
 	if e != nil || uid != 0 {
 		t.Fatalf("root identity = %d, %v", uid, e)
@@ -312,6 +326,8 @@ func TestResolveIdentitiesFromSystemFiles(t *testing.T) {
 }
 
 func TestPeerUIDRejectsNonUnixConnection(t *testing.T) {
+	t.Parallel()
+
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()

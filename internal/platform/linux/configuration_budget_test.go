@@ -9,6 +9,8 @@ import (
 )
 
 func TestConfigurationAggregateByteBudget(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	dir := filepath.Join(root, "profiles")
 	fixtureOK(t, os.Mkdir(dir, 0700))
@@ -40,6 +42,8 @@ func TestConfigurationAggregateByteBudget(t *testing.T) {
 }
 
 func TestConfigurationDefinitionBudgetAcrossDirectories(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	dirs := []string{filepath.Join(root, "first"), filepath.Join(root, "second")}
 	for _, dir := range dirs {
@@ -61,6 +65,8 @@ func TestConfigurationDefinitionBudgetAcrossDirectories(t *testing.T) {
 }
 
 func TestConfigurationDirectoryBudget(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	dir := filepath.Join(root, "empty")
 	fixtureOK(t, os.Mkdir(dir, 0700))

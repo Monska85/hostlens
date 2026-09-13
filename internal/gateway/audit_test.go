@@ -30,6 +30,8 @@ func (c auditCollector) Collect(context.Context, string, contract.Args) contract
 }
 
 func TestAuditCorrelationAndConfidentiality(t *testing.T) {
+	t.Parallel()
+
 	const payload = "private-content-fixture\n{\"msg\":\"forged-event\"}"
 	cfg := config.DefaultsLinux(false)
 	managed := t.TempDir()

@@ -182,27 +182,6 @@ func archive(t *testing.T, files map[string][]byte, mutate func(*Release)) strin
 	}
 	return p
 }
-func TestArchiveVerification(t *testing.T) {
-	files := func() map[string][]byte {
-		return map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend"), "hostlens-docker-observer": []byte("observer")}
-	}
-	for _, tt := range []struct {
-		name   string
-		mutate func(*Release)
-	}{{"valid", nil}, {"checksum", func(r *Release) { r.Checksums["hostlens"] = "bad" }}, {"schema", func(r *Release) { r.Schema = 2 }}, {"architecture", func(r *Release) { r.Architecture = "unsupported" }}} {
-		t.Run(tt.name, func(t *testing.T) {
-			_, e := Extract(archive(t, files(), tt.mutate), t.TempDir(), runtime.GOARCH)
-			if (e == nil) != (tt.name == "valid") {
-				t.Fatal(e)
-			}
-		})
-	}
-	bad := files()
-	bad["../escape"] = []byte("bad")
-	if _, e := Extract(archive(t, bad, nil), t.TempDir(), runtime.GOARCH); e == nil {
-		t.Fatal("traversal accepted")
-	}
-}
 func TestUpgradePreservesPolicyAndTracksPrevious(t *testing.T) {
 	m, source, _ := setup(t)
 	if e := m.Install(context.Background(), source, false); e != nil {
@@ -541,23 +520,6 @@ func TestServiceIdentityUIDSeparation(t *testing.T) {
 				t.Fatalf("UIDs %v: %v", uids, err)
 			}
 		})
-	}
-}
-
-func TestIdentityCollisionAfterCreationStopsBeforeUnits(t *testing.T) {
-	m, source, sys := setup(t)
-	m.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		b, err := sys.run(ctx, name, args...)
-		if name == "useradd" && err == nil {
-			sys.users[args[len(args)-1]] = 200
-		}
-		return b, err
-	}
-	if err := m.Install(context.Background(), source, false); err == nil || !strings.Contains(err.Error(), "share UID") {
-		t.Fatalf("collision accepted: %v", err)
-	}
-	if _, err := os.Stat(m.path("/etc/systemd/system/hostlens-gateway.service")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("created runnable units before verifying identities", err)
 	}
 }
 

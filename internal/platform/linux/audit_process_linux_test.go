@@ -28,6 +28,8 @@ func auditTestResult() contract.Result {
 	return contract.Result{Data: map[string]any{"coverage_complete": true}}
 }
 func TestProcessStatParsing(t *testing.T) {
+	t.Parallel()
+
 	stat := processFixtureStat(42, "worker ) (odd)")
 	out, e := parseProcessStat([]byte(stat), 42)
 	if e != nil || out["name"] != "worker ) (odd)" || out["start_ticks"] != uint64(123) {
@@ -40,6 +42,8 @@ func TestProcessStatParsing(t *testing.T) {
 	}
 }
 func TestAuditProcessEvidenceAndDeniedSecrets(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	c.Root = dir
 	writeAuditFixture(t, c, "/proc/42/stat", processFixtureStat(42, "worker"))
@@ -72,6 +76,8 @@ func TestAuditProcessEvidenceAndDeniedSecrets(t *testing.T) {
 	}
 }
 func TestAuditProcessesPagingAndBudget(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	c.Root = dir
 	for _, pid := range []int{100, 2, 40} {
@@ -103,8 +109,28 @@ func TestAuditProcessesPagingAndBudget(t *testing.T) {
 	if !r.Truncated || r.Data["observed_processes"] != 1 {
 		t.Fatal(r)
 	}
+	// Malformed, denied, and absent sources keep their own classification
+	// instead of collapsing into one partial-observation issue.
+	c2, root2 := fixture(t)
+	c2.Root = root2
+	writeAuditFixture(t, c2, "/proc/1/stat", "malformed")
+	writeAuditFixture(t, c2, "/proc/2/stat", processFixtureStat(2, "worker"))
+	fixtureOK(t, os.MkdirAll(filepath.Join(root2, "proc/3"), 0700))
+	c2.Policy.Rules = append(c2.Policy.Rules, policy.Rule{Category: "files", Pattern: "/proc/2/stat", Deny: true})
+	r = auditTestResult()
+	c2.auditProcesses(context.Background(), &r, contract.Args{})
+	for _, code := range []string{"malformed_source", "policy_denied", "source_unavailable"} {
+		if !auditHasIssue(r, code) {
+			t.Fatalf("missing %s classification: %+v", code, r)
+		}
+	}
+	if auditHasIssue(r, "partial_observation") {
+		t.Fatal("source failures collapsed")
+	}
 }
 func TestAuditDirectoryResolvedDenial(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	c.Root = dir
 	fixtureOK(t, os.Mkdir(filepath.Join(dir, "private"), 0700))
@@ -116,6 +142,8 @@ func TestAuditDirectoryResolvedDenial(t *testing.T) {
 	}
 }
 func TestAuditProcessAbsentAndCancellation(t *testing.T) {
+	t.Parallel()
+
 	c, dir := fixture(t)
 	c.Root = dir
 	r := auditTestResult()
@@ -134,6 +162,8 @@ func TestAuditProcessAbsentAndCancellation(t *testing.T) {
 }
 
 func TestAuditLinkResolvedChildDenial(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	fixtureOK(t, os.Mkdir(filepath.Join(root, "real"), 0700))
@@ -150,26 +180,9 @@ func TestAuditLinkResolvedChildDenial(t *testing.T) {
 	}
 }
 
-func TestProcessFailuresKeepSourceClassification(t *testing.T) {
-	c, root := fixture(t)
-	c.Root = root
-	writeAuditFixture(t, c, "/proc/1/stat", "malformed")
-	writeAuditFixture(t, c, "/proc/2/stat", processFixtureStat(2, "worker"))
-	fixtureOK(t, os.MkdirAll(filepath.Join(root, "proc/3"), 0700))
-	c.Policy.Rules = append(c.Policy.Rules, policy.Rule{Category: "files", Pattern: "/proc/2/stat", Deny: true})
-	r := auditTestResult()
-	c.auditProcesses(context.Background(), &r, contract.Args{})
-	for _, code := range []string{"malformed_source", "policy_denied", "source_unavailable"} {
-		if !auditHasIssue(r, code) {
-			t.Fatalf("missing %s classification: %+v", code, r)
-		}
-	}
-	if auditHasIssue(r, "partial_observation") {
-		t.Fatal("source failures collapsed")
-	}
-}
-
 func TestProcessLinkReadsConsumeAggregateBudget(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	fixtureOK(t, os.MkdirAll(filepath.Join(root, "proc/42/fd"), 0700))
@@ -194,6 +207,8 @@ func TestProcessLinkReadsConsumeAggregateBudget(t *testing.T) {
 }
 
 func TestProcessFinalReadLimitPreservesUnverifiedEvidence(t *testing.T) {
+	t.Parallel()
+
 	c, root := fixture(t)
 	c.Root = root
 	stat := processFixtureStat(42, "worker")

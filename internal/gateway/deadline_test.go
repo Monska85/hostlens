@@ -43,7 +43,7 @@ func TestReloadAppliesRequestAndResponseDeadlines(t *testing.T) {
 		grow  bool
 		delay time.Duration
 	}{
-		{"body-grow", true, 0}, {"body-shrink", false, 0}, {"response-grow", true, 5200 * time.Millisecond},
+		{"body-grow", true, 0}, {"body-shrink", false, 0}, {"response-grow", true, 520 * time.Millisecond},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			grow := scenario.grow
@@ -60,7 +60,7 @@ func TestReloadAppliesRequestAndResponseDeadlines(t *testing.T) {
 			initial := backend.NewSnapshot(cfg, p)
 			cfg.Limits.ToolTimeout = time.Second
 			if scenario.delay > 0 {
-				cfg.Limits.ToolTimeout = 7 * time.Second
+				cfg.Limits.ToolTimeout = 900 * time.Millisecond
 			}
 			if !grow {
 				cfg.Limits.ToolTimeout = 50 * time.Millisecond
@@ -100,7 +100,7 @@ func TestReloadAppliesRequestAndResponseDeadlines(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer conn.Close()
-			if err := conn.SetDeadline(time.Now().Add(9 * time.Second)); err != nil {
+			if err := conn.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
 			body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
@@ -154,6 +154,8 @@ func TestReloadAppliesRequestAndResponseDeadlines(t *testing.T) {
 }
 
 func TestIdleTimeoutRequiresRestart(t *testing.T) {
+	t.Parallel()
+
 	cfg := config.DefaultsLinux(false)
 	p, err := policy.CompileLinux(cfg, "/configuration", nil)
 	if err != nil {

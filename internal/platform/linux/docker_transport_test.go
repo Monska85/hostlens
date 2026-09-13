@@ -87,6 +87,8 @@ func transportCollector(t *testing.T, observer DockerObserver) *Collector {
 }
 
 func TestObserverTransportSuccess(t *testing.T) {
+	t.Parallel()
+
 	o := newTransportObserver(t)
 	c := transportCollector(t, NewObserverClient(o.path))
 	response, e := c.observe(context.Background(), dockerobs.Request{Version: 1, Operation: dockerobs.OpContainerList})
@@ -104,6 +106,8 @@ func TestObserverTransportSuccess(t *testing.T) {
 }
 
 func TestObserverTransportHTTPRefusal(t *testing.T) {
+	t.Parallel()
+
 	o := newTransportObserver(t)
 	c := transportCollector(t, NewObserverClient(o.path))
 	o.set("badrequest")
@@ -118,6 +122,8 @@ func TestObserverTransportHTTPRefusal(t *testing.T) {
 }
 
 func TestObserverTransportConnectionRefused(t *testing.T) {
+	t.Parallel()
+
 	dead := filepath.Join(t.TempDir(), "dead.sock")
 	c := transportCollector(t, NewObserverClient(dead))
 	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
@@ -131,6 +137,8 @@ func TestObserverTransportConnectionRefused(t *testing.T) {
 }
 
 func TestObserverTransportMalformedBody(t *testing.T) {
+	t.Parallel()
+
 	o := newTransportObserver(t)
 	c := transportCollector(t, NewObserverClient(o.path))
 	o.set("malformed")
@@ -141,6 +149,8 @@ func TestObserverTransportMalformedBody(t *testing.T) {
 }
 
 func TestObserverTransportContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	o := newTransportObserver(t)
 	c := transportCollector(t, NewObserverClient(o.path))
 	o.set("slow")
@@ -150,23 +160,22 @@ func TestObserverTransportContextCancellation(t *testing.T) {
 	if !result.Error || result.Issues[0].Code != "cancelled_or_timeout" {
 		t.Fatalf("cancellation must surface as cancelled_or_timeout: %+v", result.Issues)
 	}
-}
-
-func TestDockerUnavailableClassifiesTimeoutAndPlainFailure(t *testing.T) {
-	c := transportCollector(t, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	result := c.dockerUnavailable(ctx, errors.New("plain"))
-	if result.Issues[0].Code != "docker_unavailable" {
-		t.Fatalf("plain failure code: %v", result.Issues[0].Code)
+	// Direct classification: plain failures stay docker_unavailable while
+	// cancelled or timed-out contexts become cancelled_or_timeout.
+	classifier := transportCollector(t, nil)
+	cctx, ccancel := context.WithCancel(context.Background())
+	if r := classifier.dockerUnavailable(cctx, errors.New("plain")); r.Issues[0].Code != "docker_unavailable" {
+		t.Fatalf("plain failure code: %v", r.Issues[0].Code)
 	}
-	cancel()
-	result = c.dockerUnavailable(ctx, context.Cause(ctx))
-	if result.Issues[0].Code != "cancelled_or_timeout" {
-		t.Fatalf("cancelled failure code: %v", result.Issues[0].Code)
+	ccancel()
+	if r := classifier.dockerUnavailable(cctx, context.Cause(cctx)); r.Issues[0].Code != "cancelled_or_timeout" {
+		t.Fatalf("cancelled failure code: %v", r.Issues[0].Code)
 	}
 }
 
 func TestDockerStatsBranches(t *testing.T) {
+	t.Parallel()
+
 	stopped := summary(runningID, "web", "exited")
 	stats := &dockerobs.ContainerStats{Read: time.Now().UTC()}
 	c := collectorWith(t, []string{"stats/*"}, nil, &fakeObserver{
@@ -236,11 +245,10 @@ func TestDockerStatsBranches(t *testing.T) {
 	if !result.Error || result.Issues[0].Code != "policy_denied" {
 		t.Fatalf("specific denial must win: %+v", result.Issues)
 	}
-}
 
-func TestDockerDiskUsageDeniedClass(t *testing.T) {
+	// An ungranted disk-usage class stays denied even with a live observer.
 	usage := &dockerobs.DiskUsage{LayersSize: &[]int64{10}[0]}
-	c := collectorWith(t, []string{"containers"}, nil, &fakeObserver{
+	c = collectorWith(t, []string{"containers"}, nil, &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {
 			return []dockerobs.ContainerSummary{summary(runningID, "web", "running")}
 		},
@@ -248,12 +256,14 @@ func TestDockerDiskUsageDeniedClass(t *testing.T) {
 			dockerobs.OpDiskUsage: {Usage: usage},
 		},
 	})
-	result := c.Collect(context.Background(), "get_docker_disk_usage", contract.Args{})
+	result = c.Collect(context.Background(), "get_docker_disk_usage", contract.Args{})
 	if !result.Error || result.Issues[0].Code != "policy_denied" {
 		t.Fatalf("ungranted disk usage must stay denied: %+v", result.Issues)
 	}
 }
 func TestDockerLogsBranches(t *testing.T) {
+	t.Parallel()
+
 	logs := &dockerobs.LogPage{Records: []dockerobs.LogRecord{{Stream: "stdout", Message: "line"}}}
 	observer := &fakeObserver{
 		containers: func() []dockerobs.ContainerSummary {

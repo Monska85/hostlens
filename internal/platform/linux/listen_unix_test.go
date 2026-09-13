@@ -14,6 +14,8 @@ import (
 )
 
 func TestListenUnixRefusesUnsafeResources(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	regular := filepath.Join(dir, "regular")
 	if e := os.WriteFile(regular, []byte("x"), 0644); e != nil {
@@ -31,6 +33,8 @@ func TestListenUnixRefusesUnsafeResources(t *testing.T) {
 }
 
 func TestListenUnixRefusesLiveInstance(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "o.sock")
 	l, e := net.Listen("unix", path)
@@ -44,6 +48,8 @@ func TestListenUnixRefusesLiveInstance(t *testing.T) {
 }
 
 func TestListenUnixReclaimsStaleSocket(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "o.sock")
 	l, e := net.Listen("unix", path)
@@ -81,6 +87,8 @@ func TestListenUnixReclaimsStaleSocket(t *testing.T) {
 }
 
 func TestListenUnixRefusesForeignOwnedSocket(t *testing.T) {
+	t.Parallel()
+
 	if os.Getuid() != 0 {
 		t.Skip("foreign-owner refusal requires root")
 	}
@@ -100,6 +108,8 @@ func TestListenUnixRefusesForeignOwnedSocket(t *testing.T) {
 }
 
 func TestPeerUIDPlatformRejectsNonUnix(t *testing.T) {
+	t.Parallel()
+
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
@@ -108,6 +118,8 @@ func TestPeerUIDPlatformRejectsNonUnix(t *testing.T) {
 	}
 }
 func TestPlatformUIDResolution(t *testing.T) {
+	t.Parallel()
+
 	if uid, e := UID("root"); e != nil || uid != 0 {
 		t.Fatalf("root identity = %d, %v", uid, e)
 	}
@@ -120,6 +132,8 @@ func TestPlatformUIDResolution(t *testing.T) {
 }
 
 func TestUnixClientBuildsLocalTransport(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "probe.sock")
 	l, e := net.Listen("unix", path)

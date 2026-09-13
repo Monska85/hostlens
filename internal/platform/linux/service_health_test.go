@@ -15,6 +15,8 @@ import (
 )
 
 func TestHealthUsesAllServiceObservationsAndPreservesPartialFailures(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name, suffix string
 		denied       bool
@@ -53,7 +55,10 @@ func TestHealthUsesAllServiceObservationsAndPreservesPartialFailures(t *testing.
 	}
 }
 
-func TestHealthDecodesNewlineMountPath(t *testing.T) {
+func TestHealthMountDecodingAndControlSkips(t *testing.T) {
+	t.Parallel()
+
+	// Escaped octal mounts decode back to native paths.
 	c, root := fixture(t)
 	c.Root = root
 	c.Config.Health.Required = []string{"filesystem"}
@@ -68,9 +73,7 @@ func TestHealthDecodesNewlineMountPath(t *testing.T) {
 	if !ok || len(filesystems) != 1 || filesystems[0]["mount"] != mount || r.Data["complete"] != true {
 		t.Fatalf("escaped native mount was not observed: %+v", r)
 	}
-}
-
-func TestHealthSkipsControlMountsWithoutHidingStorage(t *testing.T) {
+	// Control mounts are skipped without hiding real storage.
 	for _, missingStorage := range []bool{false, true} {
 		t.Run(fmt.Sprint("missing_storage=", missingStorage), func(t *testing.T) {
 			c, root := fixture(t)

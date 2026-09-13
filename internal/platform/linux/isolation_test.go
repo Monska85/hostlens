@@ -25,6 +25,8 @@ func optionsWithRo(options string) string {
 }
 
 func TestSecretIsMaskedGuards(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	masked := dir + "/mask"
 	if e := os.Mkdir(masked, 0000); e != nil {
@@ -77,33 +79,28 @@ func TestSecretIsMaskedGuards(t *testing.T) {
 	if e := secretIsMasked(fileMask, roFile); e == nil {
 		t.Fatal("mask without the accessible reference accepted")
 	}
-}
 
-func TestSecretIsMaskedReadFailureSurfaces(t *testing.T) {
+	// The live entry point surfaces an unmasked path as a failure.
 	if _, e := os.ReadFile("/proc/self/mountinfo"); e != nil {
 		t.Skip("mountinfo unavailable in this environment")
 	}
 	if e := SecretIsMasked("/definitely/not/masked/path"); e == nil {
 		t.Fatal("unmasked path accepted")
 	}
-}
 
-func TestSecretIsMaskedMatchesPrefixOnlyBelowMask(t *testing.T) {
-	dir := t.TempDir()
+	// A sibling sharing only the text prefix must not pass the prefix check.
 	sibling := dir + "/mask-not"
 	if e := os.WriteFile(sibling, []byte("x"), 0644); e != nil {
 		t.Fatal(e)
 	}
-	// A sibling sharing only the text prefix must not pass the prefix check.
-	table := []byte("42 1 0:42 / " + dir + "/mask" + " /systemd/inaccessible/dir ro,seclabel - tmpfs tmpfs rw,seclabel\n")
+	table = []byte("42 1 0:42 / " + dir + "/mask" + " /systemd/inaccessible/dir ro,seclabel - tmpfs tmpfs rw,seclabel\n")
 	if e := secretIsMasked(sibling, table); e == nil {
 		t.Fatal("prefix-collision path accepted")
 	}
-}
 
-func TestSecretIsMaskedMalformedLinesIgnored(t *testing.T) {
-	table := []byte("not enough fields\n\n42 1 0:42 / /run/inaccessible /systemd/inaccessible/dir ro - tmpfs tmpfs rw\n")
-	if e := secretIsMasked("/run/inaccessible", table); e == nil {
+	// Malformed mountinfo lines are ignored while later lines still apply.
+	malformed := []byte("not enough fields\n\n42 1 0:42 / /run/inaccessible /systemd/inaccessible/dir ro - tmpfs tmpfs rw\n")
+	if e := secretIsMasked("/run/inaccessible", malformed); e == nil {
 		t.Fatal("malformed table with unstatable mask accepted")
 	}
 }

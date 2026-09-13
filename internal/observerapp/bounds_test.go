@@ -27,6 +27,8 @@ func allowSocketType(path string, _ int) error {
 }
 
 func TestObserverRejectsUnauthorizedPeers(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ipc := filepath.Join(dir, "observer.sock")
 	l, e := net.Listen("unix", ipc)
@@ -59,8 +61,15 @@ func TestObserverRejectsUnauthorizedPeers(t *testing.T) {
 	if n, e := conn.Read(make([]byte, 64)); n != 0 || e == nil {
 		t.Fatalf("rejected peer received a response: n=%d err=%v", n, e)
 	}
-	// The matching identity is accepted and may exchange bytes.
-	accepting := checkedListener{l, uint32(os.Getuid())}
+	// The matching identity is accepted and may exchange bytes. A dedicated
+	// listener keeps the accept deterministic: the rejecting loop above stays
+	// parked inside its own Accept and must not compete for this connection.
+	ipc2 := filepath.Join(dir, "observer-accept.sock")
+	l2, e := net.Listen("unix", ipc2)
+	if e != nil {
+		t.Fatal(e)
+	}
+	accepting := checkedListener{l2, uint32(os.Getuid())}
 	accepted := make(chan net.Conn, 1)
 	go func() {
 		c, e := accepting.Accept()
@@ -68,7 +77,7 @@ func TestObserverRejectsUnauthorizedPeers(t *testing.T) {
 			accepted <- c
 		}
 	}()
-	conn2, e := net.DialTimeout("unix", ipc, time.Second)
+	conn2, e := net.DialTimeout("unix", ipc2, time.Second)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -82,6 +91,8 @@ func TestObserverRejectsUnauthorizedPeers(t *testing.T) {
 }
 
 func TestEngineSocketValidationRefusals(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "docker.sock")
 	l, e := net.Listen("unix", sock)
@@ -135,6 +146,8 @@ func TestEngineSocketValidationRefusals(t *testing.T) {
 }
 
 func TestObserverOversizedAndMalformedDaemonResponses(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	sock := filepath.Join(dir, "docker.sock")
 	l, e := net.Listen("unix", sock)
@@ -194,7 +207,7 @@ func TestObserverStalledDaemonStaysBounded(t *testing.T) {
 	defer s.Close()
 	s.engine.validate = allowSocketType
 	saved := observationBudget
-	observationBudget = 100 * time.Millisecond
+	observationBudget = 30 * time.Millisecond
 	t.Cleanup(func() { observationBudget = saved })
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
@@ -211,6 +224,8 @@ func TestObserverStalledDaemonStaysBounded(t *testing.T) {
 }
 
 func TestObserverIPCRejectsHostileBodies(t *testing.T) {
+	t.Parallel()
+
 	engine := newRecordingEngine(t)
 	s := NewServer(engine.path, 0)
 	defer s.Close()
@@ -262,6 +277,8 @@ func TestObserverIPCRejectsHostileBodies(t *testing.T) {
 }
 
 func TestObserverConcurrentColdStartRace(t *testing.T) {
+	t.Parallel()
+
 	engine := newRecordingEngine(t)
 	s := NewServer(engine.path, 0)
 	defer s.Close()
@@ -287,6 +304,8 @@ func TestObserverConcurrentColdStartRace(t *testing.T) {
 }
 
 func TestLogDecodeHonestExactCeiling(t *testing.T) {
+	t.Parallel()
+
 	payload := strings.Repeat("x", 4096)
 	page, e := decodeLogStream(strings.NewReader(payload), 4096, true)
 	if e != nil {
