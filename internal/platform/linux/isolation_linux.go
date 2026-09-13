@@ -15,6 +15,12 @@ func SecretIsMasked(secret string) error {
 	if e != nil {
 		return e
 	}
+	return secretIsMasked(secret, b)
+}
+
+// secretIsMasked is the pure mountinfo-based verification. It inspects only
+// the supplied mount table and the live stat identity of the masked path.
+func secretIsMasked(secret string, b []byte) error {
 	unescape := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)

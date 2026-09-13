@@ -88,7 +88,7 @@ func (c *client) containerLogs(ctx context.Context, r dockerobs.Request) dockero
 		return fail(fmt.Errorf("log stream unavailable: %w", err))
 	}
 	page.TTY = tty
-	return dockerobs.Response{Logs: page, Negotiated: c.negotiated}
+	return dockerobs.Response{Logs: page}
 }
 
 // decodeLogStream reads one bounded log response. Non-TTY responses are

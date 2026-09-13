@@ -7,6 +7,7 @@ import (
 )
 
 func TestRequestValidation(t *testing.T) {
+	idHex := "6f9c2f5f0f0e0c1d2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f"
 	valid := []Request{
 		{Version: ProtocolVersion, Operation: OpEngineInfo},
 		{Version: ProtocolVersion, Operation: OpContainerList},
@@ -27,7 +28,14 @@ func TestRequestValidation(t *testing.T) {
 		{Version: ProtocolVersion, Operation: OpContainerList, Selector: "6f9c2f5f0f0e0c1d2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f"},
 		{Version: ProtocolVersion, Operation: OpContainerLogs, Logs: LogOptions{Since: time.Now(), Until: time.Now().Add(-time.Hour)}},
 		{Version: ProtocolVersion, Operation: OpContainerLogs, Logs: LogOptions{MaxBytes: MaxLogBytes + 1}},
-		{Version: ProtocolVersion, Operation: OpImageList, Limit: -1},
+		{Version: ProtocolVersion, Operation: OpContainerDetail, Selector: idHex, Logs: LogOptions{Records: -1}},
+		{Version: ProtocolVersion, Operation: OpContainerStats, Selector: idHex, Logs: LogOptions{Records: MaxLogRecords + 1}},
+		{Version: ProtocolVersion, Operation: OpContainerStats, Selector: idHex, Logs: LogOptions{MaxBytes: -1}},
+		{Version: ProtocolVersion, Operation: OpContainerLogs, Selector: idHex, Logs: LogOptions{MaxBytes: MaxLogBytes + 1}},
+		{Version: ProtocolVersion, Operation: OpContainerLogs, Selector: idHex, Logs: LogOptions{Since: time.Now(), Until: time.Now().Add(-time.Hour)}},
+	}
+	if !ValidID(idHex) || ValidID("web") {
+		t.Fatal("ValidID must accept only full hex identities")
 	}
 	for _, r := range invalid {
 		if e := r.Validate(); e == nil {
@@ -52,6 +60,10 @@ func TestNegotiateRange(t *testing.T) {
 		{"1.44", "1.44", APICeiling, "1.44", false},
 		{"garbage", "1.41", APICeiling, "", true},
 		{"1.41", "", APICeiling, "1.41", false},
+		{"1.41", "garbage", APICeiling, "", true},
+		{"1.41", "1.41", "garbage", "", true},
+		{"1.41", "1.60", APICeiling, "", true},
+		{"1.41", "1.42", APICeiling, "", true},
 	} {
 		got, e := Negotiate(tc.daemon, tc.daemonMin, tc.max)
 		if (e != nil) != tc.wantErr {
@@ -89,6 +101,15 @@ func TestStableFingerprintEquality(t *testing.T) {
 	if a.Equal(b) {
 		t.Fatal("reference change must change the fingerprint")
 	}
+	if a.Equal(StableFingerprint{ContainerIDs: []string{"a"}}) {
+		t.Fatal("container count mismatch must not be equal")
+	}
+	if a.Equal(StableFingerprint{ContainerIDs: []string{"a", "b"}, References: map[string]string{"a": "x"}}) {
+		t.Fatal("reference count mismatch must not be equal")
+	}
+	if a.Equal(StableFingerprint{ContainerIDs: []string{"a", "c"}, References: map[string]string{"a": "x", "b": "y"}}) {
+		t.Fatal("container identity mismatch must not be equal")
+	}
 }
 
 func TestResponseExcludesUnknownFields(t *testing.T) {
@@ -102,7 +123,7 @@ func TestResponseExcludesUnknownFields(t *testing.T) {
 	data := ContainerData(summary)
 	for key := range data {
 		switch key {
-		case "id", "names", "image_id", "state", "image", "status", "health", "created", "started_at", "finished_at", "restart_count", "ports", "mounts", "networks", "size_root_fs", "size_rw", "log_driver", "restart_policy", "pids_limit", "nano_cpus", "cpu_shares", "cpu_period", "cpu_quota", "memory_limit", "memory_swap", "references":
+		case "id", "names", "image_id", "state", "image", "status", "health", "created", "started_at", "finished_at", "restart_count", "ports", "mounts", "networks", "log_driver", "restart_policy", "pids_limit", "nano_cpus", "cpu_shares", "cpu_period", "cpu_quota", "memory_limit", "memory_swap":
 		default:
 			t.Fatalf("projection emitted unmaintained key %s", key)
 		}

@@ -169,3 +169,34 @@ func TestProvenanceRuleLimit(t *testing.T) {
 		t.Fatal("rule overflow accepted or misclassified", err)
 	}
 }
+
+func TestValidLinuxUnitEdgeTable(t *testing.T) {
+	valid := []string{"-.mount", "nginx.service", "hostlens-docker-observer.socket", "user@1000.service", "dev-sda1.device", "run-docker.mount", "system.slice", "swap.swap"}
+	for _, unit := range valid {
+		if !ValidLinuxUnit(unit) {
+			t.Fatalf("unit %q must be valid", unit)
+		}
+	}
+	invalid := []string{
+		"-system.slice",                       // leading dash is never valid except the literal root mount
+		"-.service",                           // only -.mount is special
+		"nginx.txt",                           // unsupported suffix
+		"no-suffix",                           // missing suffix
+		"",                                    // empty
+		strings.Repeat("a", 250) + ".service", // > 256 characters
+		"nginx.service\x00x",                  // control byte
+	}
+	for _, unit := range invalid {
+		if ValidLinuxUnit(unit) {
+			t.Fatalf("unit %q must be invalid", unit)
+		}
+	}
+	// The boundary is inclusive: 256 characters are still valid.
+	long := strings.Repeat("a", 256-len(".service")) + ".service"
+	if !ValidLinuxUnit(long) {
+		t.Fatal("a 256-character unit name must stay valid")
+	}
+	if ValidLinuxUnit(strings.Repeat("a", 256-len(".service")+1) + ".service") {
+		t.Fatal("a 257-character unit name must be invalid")
+	}
+}

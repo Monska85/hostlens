@@ -145,3 +145,82 @@ func TestDockerReloadablePolicyRemainsPolicy(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestValidateLinuxIdentityNamesAreFixed(t *testing.T) {
+	c := dockerConfig(func(c *Config) { c.GatewayUser = "someone-else" })
+	if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "fixed") {
+		t.Fatalf("renamed gateway identity accepted: %v", e)
+	}
+	c = dockerConfig(func(c *Config) { c.DiagnosticsUser = "someone-else" })
+	if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "fixed") {
+		t.Fatalf("renamed diagnostics identity accepted: %v", e)
+	}
+}
+
+func TestValidateLinuxTLSPathsMustBeAbsoluteAndClean(t *testing.T) {
+	for _, path := range []string{"cert/relative.pem", "/abs/cert//p.pem", "/abs/cert/p.pem/"} {
+		c := dockerConfig(func(c *Config) {
+			c.Server.TLS.Enabled = true
+			c.Server.TLS.CertFile = path
+			c.Server.TLS.KeyFile = "/abs/key.pem"
+		})
+		if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "absolute and clean") {
+			t.Fatalf("TLS cert path %q accepted: %v", path, e)
+		}
+	}
+	for _, path := range []string{"key/relative.pem", "/abs/key//k.pem", "/abs/key/k.pem/"} {
+		c := dockerConfig(func(c *Config) {
+			c.Server.TLS.Enabled = true
+			c.Server.TLS.CertFile = "/abs/cert.pem"
+			c.Server.TLS.KeyFile = path
+		})
+		if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "absolute and clean") {
+			t.Fatalf("TLS key path %q accepted: %v", path, e)
+		}
+	}
+}
+
+func TestValidateLinuxProfileTokenSocketPathsMustBeAbsoluteAndClean(t *testing.T) {
+	c := dockerConfig(nil)
+	c.ProfileDirs = []string{"relative/profiles"}
+	if e := ValidateLinux(c); e == nil || !strings.Contains(e.Error(), "absolute clean path") {
+		t.Fatalf("relative profile dir accepted: %v", e)
+	}
+	c = dockerConfig(nil)
+	c.ProfileDirs = []string{"/abs//double"}
+	if e := ValidateLinux(c); e == nil {
+		t.Fatalf("unclean profile dir accepted")
+	}
+	c = dockerConfig(nil)
+	c.TokenStore = "relative/tokens.json"
+	if e := ValidateLinux(c); e == nil {
+		t.Fatalf("relative token store accepted")
+	}
+	c = dockerConfig(nil)
+	c.Socket = "/run/x//diag.sock"
+	if e := ValidateLinux(c); e == nil {
+		t.Fatalf("unclean socket accepted")
+	}
+	c = dockerConfig(nil)
+	c.AdminSocket = "/run/x//admin.sock"
+	if e := ValidateLinux(c); e == nil {
+		t.Fatalf("unclean admin socket accepted")
+	}
+}
+
+func TestValidateLinuxUserAndSystemDefaultsDiffer(t *testing.T) {
+	user := DefaultsLinux(false)
+	system := DefaultsLinux(true)
+	if e := ValidateLinux(user); e != nil {
+		t.Fatalf("user defaults rejected: %v", e)
+	}
+	if e := ValidateLinux(system); e != nil {
+		t.Fatalf("system defaults rejected: %v", e)
+	}
+	if user.Mode == system.Mode || user.Privilege == system.Privilege {
+		t.Fatalf("user and system defaults must differ: %+v vs %+v", user, system)
+	}
+	if user.GatewayUser == system.GatewayUser && system.GatewayUser != "" {
+		t.Fatalf("system must pin the gateway identity")
+	}
+}

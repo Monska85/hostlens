@@ -99,3 +99,17 @@ One warm-run failure exposed restored cache ownership incompatible with dropped 
 The [metrics validation record](../../openspec/changes/archive/2026-09-12-add-service-metrics/validation.md) documents implementation, measurements and three cleanly resolved review rounds. The final implementation passed the complete disposable-container race/coverage suite (79.8%), vet, portable and Linux builds, all ten matrix cases, archive integrity, formatting/lint, and specification validation. The new dependency graph passed the vulnerability scan.
 
 Real systemd cases verified protected and anonymous scrapes, reload transitions, backend loss and process-counter reset in both privilege modes. Adversarial tests cover withheld HTTP bodies, malformed/missing backend measurements, stalled-worker admission, role isolation, credential lifecycle, sensitive-data exclusion and successful MCP work during concurrent scrapes. The exhaustive catalog has 1,745 series and measured about 165 KB at the current tool count. Serial SDK request measurements remained within observed baseline timing variation, with three additional allocations; this does not establish zero overhead or network throughput.
+
+## Post-release coverage and dead-code pass
+
+After the v0.1.0 release, verified dead code was deleted from the observation contract (`ValidName`, `ImageSummary.UniqueSize`, `ContainerSummary.References`/`ResourceRefs`, `Response.Negotiated`, `EngineInfo.Rootless`/`DockerDesktop`, `ContainerSummary` size fields, and `Request.Offset`/`Limit`); the backend and observer ship version-coherent, so the field removals are safe within one artifact set. The pass raised internal statement coverage in the disposable checks container from 77.5% to 85.8%, with tests for the observer transport (success, HTTP refusal, dead socket, malformed body, cancellation), the socket-activated listener (including child-process coverage merging through `-test.gocoverdir`), archive extraction, lifecycle commands and readiness, CLI flag and plan paths, gateway envelopes and measured flushes, and the CPU health sample.
+
+The pass also fixed a real defect the new tests exposed: `limitedBuffer` embedded `bytes.Buffer`, whose promoted `ReadFrom` let `exec`'s `io.Copy` bypass the inspection limit entirely, so oversized command output was captured unbounded. The buffer is now a plain `io.Writer` and the ceiling is enforced and tested.
+
+Functions intentionally below 50% or uncovered, with reasons:
+
+- Observer and CLI `Main` serve/signal loops: process lifetime, covered by native acceptance instead.
+- `ListenInherited` and observer `Main` listener setup beyond refusal branches: socket activation success requires a real service manager handoff; the subprocess helper covers the path and merges its counters.
+- `secretIsMasked` guards after the reference check (reference `SameFile` mismatch, non-empty file size, unclean path, success for file and directory masks): they need a real systemd inaccessible mount under `/run/systemd/inaccessible`; tests refuse to create one. Reachable guards (no matching mount, prefix match, missing `ro`, unstatable path, non-root uid, non-zero permissions) are covered.
+- `docker_live_test.go` stays environment-gated and is excluded from coverage by design.
+- `PeerUID`/`resolveUID`/`resolveGID` syscall-error and corrupted-system-file branches: unreachable without corrupting live system files.

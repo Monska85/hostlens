@@ -245,7 +245,6 @@ func TestObserverRejectsInvalidTypedRequests(t *testing.T) {
 		{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerDetail, Selector: "web"},
 		{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerStats},
 		{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerLogs, Logs: dockerobs.LogOptions{MaxBytes: dockerobs.MaxLogBytes + 1}},
-		{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerList, Offset: -1},
 	}
 	for _, request := range rejected {
 		if e := request.Validate(); e == nil {

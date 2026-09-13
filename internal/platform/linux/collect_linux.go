@@ -29,21 +29,25 @@ type Commands struct {
 	Root  string
 }
 type limitedBuffer struct {
-	bytes.Buffer
+	buf      []byte
 	n        int
 	exceeded bool
 }
 
+// Write clamps total captured bytes at n. The buffer is a plain io.Writer
+// on purpose: embedding bytes.Buffer would expose ReadFrom and WriteString,
+// which let exec's io.Copy bypass the ceiling entirely.
 func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > b.n {
-		remaining := b.n - b.Len()
+	if len(b.buf)+len(p) > b.n {
+		remaining := b.n - len(b.buf)
 		if remaining > 0 {
-			b.Buffer.Write(p[:remaining])
+			b.buf = append(b.buf, p[:remaining]...)
 		}
 		b.exceeded = true
 		return len(p), nil
 	}
-	return b.Buffer.Write(p)
+	b.buf = append(b.buf, p...)
+	return len(p), nil
 }
 func commandPath(root, name string) (string, error) {
 	allowed := map[string]bool{"systemctl": true, "journalctl": true, "dpkg-query": true, "pacman": true}
@@ -78,7 +82,7 @@ func (r Commands) Run(ctx context.Context, name string, args ...string) ([]byte,
 	if b.exceeded {
 		return nil, errors.New("inspection limit exceeded")
 	}
-	return b.Bytes(), e
+	return b.buf, e
 }
 
 type Collector struct {

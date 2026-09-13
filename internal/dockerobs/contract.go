@@ -72,8 +72,6 @@ type Request struct {
 	Operation string     `json:"operation"`
 	Selector  string     `json:"selector,omitempty"`
 	Logs      LogOptions `json:"logs,omitempty"`
-	Offset    int        `json:"offset,omitempty"`
-	Limit     int        `json:"limit,omitempty"`
 }
 
 // LogOptions bounds one log observation. The window and record ceiling are
@@ -89,9 +87,6 @@ type LogOptions struct {
 func (r Request) Validate() error {
 	if r.Version != ProtocolVersion {
 		return fmt.Errorf("unsupported observation protocol version %d", r.Version)
-	}
-	if r.Offset < 0 || r.Limit < 0 {
-		return errors.New("negative observation bounds")
 	}
 	switch r.Operation {
 	case OpEngineInfo, OpContainerList, OpImageList, OpVolumeList, OpNetworkList, OpDiskUsage:
@@ -120,15 +115,11 @@ func (r Request) Validate() error {
 }
 
 var idRE = regexp.MustCompile(`^[a-f0-9]{64}$`)
-var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 // ValidID reports whether s is a full 64-character hexadecimal resource ID.
 func ValidID(s string) bool { return validID(s) }
 
 func validID(s string) bool { return idRE.MatchString(s) }
-
-// ValidName reports whether s is a safe literal resource name.
-func ValidName(s string) bool { return nameRE.MatchString(s) }
 
 // Response carries one typed observation or an explicit failure. Raw daemon
 // payloads never cross this boundary; every structure lists maintained fields.
@@ -144,8 +135,6 @@ type Response struct {
 	// Containers serves both list (summaries) and detail (single-element)
 	// results; detail responses populate Detail instead.
 	Containers []ContainerSummary `json:"containers,omitempty"`
-	// Negotiated is the Engine API version the observation used.
-	Negotiated string `json:"negotiated,omitempty"`
 	// Truncated reports that a maintained ceiling removed content.
 	Truncated bool `json:"truncated,omitempty"`
 	// Issue explains a bounded gap, such as ceiling truncation or an
@@ -178,8 +167,6 @@ type EngineInfo struct {
 	StoppedCount       int      `json:"stopped_count"`
 	ImageCount         int      `json:"image_count"`
 	SupportedDrivers   []string `json:"supported_log_drivers,omitempty"`
-	Rootless           bool     `json:"rootless,omitempty"`
-	DockerDesktop      bool     `json:"docker_desktop,omitempty"`
 	UnsupportedReasons []string `json:"unsupported_reasons,omitempty"`
 }
 
@@ -215,8 +202,6 @@ type ContainerSummary struct {
 	Ports         []PortMapping `json:"ports,omitempty"`
 	Mounts        []MountRef    `json:"mounts,omitempty"`
 	Networks      []string      `json:"networks,omitempty"`
-	SizeRootFs    *int64        `json:"size_root_fs,omitempty"`
-	SizeRw        *int64        `json:"size_rw,omitempty"`
 	RestartCount  *int          `json:"restart_count,omitempty"`
 	StartedAt     *time.Time    `json:"started_at,omitempty"`
 	FinishedAt    *time.Time    `json:"finished_at,omitempty"`
@@ -229,7 +214,6 @@ type ContainerSummary struct {
 	CPUQuota      *int64        `json:"cpu_quota,omitempty"`
 	Memory        *int64        `json:"memory_limit,omitempty"`
 	MemorySwap    *int64        `json:"memory_swap,omitempty"`
-	References    *ResourceRefs `json:"references,omitempty"`
 }
 
 // ContainerDetail extends the summary with inspect-only selected fields.
@@ -249,14 +233,6 @@ type Endpoint struct {
 	Name       string `json:"name"`
 	IPAddress  string `json:"ip_address,omitempty"`
 	MACAddress string `json:"mac_address,omitempty"`
-}
-
-// ResourceRefs records current container references as the daemon supplies
-// them. Counts are observation facts, never retained history.
-type ResourceRefs struct {
-	Images   int `json:"images"`
-	Volumes  int `json:"volumes"`
-	Networks int `json:"networks"`
 }
 
 // ContainerStats projects one bounded point-in-time sample. Rates are derived
@@ -296,7 +272,6 @@ type ImageSummary struct {
 	Created       *time.Time `json:"created,omitempty"`
 	Size          *int64     `json:"size_bytes,omitempty"`
 	SharedSize    *int64     `json:"shared_size_bytes,omitempty"`
-	UniqueSize    *int64     `json:"unique_size_bytes,omitempty"`
 	ContainerRefs *int       `json:"container_references,omitempty"`
 	Dangling      bool       `json:"dangling,omitempty"`
 	// CurrentlyUnused is true only when the completed observation found no

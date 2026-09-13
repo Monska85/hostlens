@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Enforce the collector inspection limit for command output: the bounded capture buffer embedded `bytes.Buffer`, whose promoted `ReadFrom` let `exec`'s copy path bypass the ceiling and capture unbounded output.
+
+### Changed
+
+- Delete verified dead code from the observer contract (`ValidName`, `UniqueSize`, `References`/`ResourceRefs`, `Response.Negotiated`, `EngineInfo` mode flags, summary size fields, `Request.Offset`/`Limit`); the diagnostic backend and observer ship version-coherent.
+- Raise internal test coverage from 77.5% to 85.8% with observer transport, listener, archive, lifecycle, CLI, gateway, and CPU-health tests; document the intentionally uncovered surface in `docs/v1/VALIDATION.md`.
+
 ## 0.1.0 - 2026-09-13
 
 First public release: bearer-authenticated MCP diagnostics for Linux hosts with opt-in, isolated Docker observer diagnostics.

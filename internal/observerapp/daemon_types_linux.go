@@ -147,7 +147,6 @@ type daemonImage struct {
 	Created     int64    `json:"Created"`
 	Size        int64    `json:"Size"`
 	SharedSize  int64    `json:"SharedSize"`
-	UniqueSize  int64    `json:"UniqueSize"`
 	Containers  int      `json:"Containers"`
 }
 

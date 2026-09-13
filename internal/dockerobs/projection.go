@@ -79,12 +79,6 @@ func ContainerData(s ContainerSummary) map[string]any {
 	if len(s.Networks) > 0 {
 		data["networks"] = s.Networks
 	}
-	if s.SizeRootFs != nil {
-		data["size_root_fs"] = *s.SizeRootFs
-	}
-	if s.SizeRw != nil {
-		data["size_rw"] = *s.SizeRw
-	}
 	if s.LogDriver != "" {
 		data["log_driver"] = s.LogDriver
 	}
@@ -111,9 +105,6 @@ func ContainerData(s ContainerSummary) map[string]any {
 	}
 	if s.MemorySwap != nil {
 		data["memory_swap"] = *s.MemorySwap
-	}
-	if s.References != nil {
-		data["references"] = s.References
 	}
 	return data
 }
@@ -210,9 +201,6 @@ func ImageData(i ImageSummary) map[string]any {
 	}
 	if i.SharedSize != nil {
 		data["shared_size"] = *i.SharedSize
-	}
-	if i.UniqueSize != nil {
-		data["unique_size"] = *i.UniqueSize
 	}
 	if i.ContainerRefs != nil {
 		data["container_references"] = *i.ContainerRefs

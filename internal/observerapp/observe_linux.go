@@ -102,15 +102,13 @@ func (c *client) engineInfo(ctx context.Context) dockerobs.Response {
 	info.SupportedDrivers = daemon.Plugins.Log
 	for _, option := range daemon.SecurityOptions {
 		if option == "name=rootless" {
-			info.Rootless = true
 			info.UnsupportedReasons = append(info.UnsupportedReasons, "rootless engine")
 		}
 	}
 	if strings.Contains(strings.ToLower(daemon.OperatingSystem), "docker desktop") {
-		info.DockerDesktop = true
 		info.UnsupportedReasons = append(info.UnsupportedReasons, "docker desktop")
 	}
-	return dockerobs.Response{Engine: &info, Negotiated: c.negotiated}
+	return dockerobs.Response{Engine: &info}
 }
 
 func (c *client) containerList(ctx context.Context) dockerobs.Response {
@@ -148,7 +146,7 @@ func (c *client) containerList(ctx context.Context) dockerobs.Response {
 		}
 		list = append(list, summary)
 	}
-	return dockerobs.Response{Containers: list, Negotiated: c.negotiated, Truncated: truncated}
+	return dockerobs.Response{Containers: list, Truncated: truncated}
 }
 
 func (c *client) containerDetail(ctx context.Context, r dockerobs.Request) dockerobs.Response {
@@ -220,7 +218,7 @@ func (c *client) containerDetail(ctx context.Context, r dockerobs.Request) docke
 			Name: name, IPAddress: endpoint.IPAddress, MACAddress: endpoint.MacAddress,
 		})
 	}
-	return dockerobs.Response{Detail: &detail, Negotiated: c.negotiated}
+	return dockerobs.Response{Detail: &detail}
 }
 
 func (c *client) containerStats(ctx context.Context, r dockerobs.Request) dockerobs.Response {
@@ -283,7 +281,7 @@ func (c *client) containerStats(ctx context.Context, r dockerobs.Request) docker
 	}
 	out.PidsCurrent = s.PidsStats.Current
 	out.PidsLimit = s.PidsStats.Limit
-	return dockerobs.Response{Stats: &out, Negotiated: c.negotiated}
+	return dockerobs.Response{Stats: &out}
 }
 
 func (c *client) imageList(ctx context.Context, r dockerobs.Request) dockerobs.Response {
@@ -307,9 +305,6 @@ func (c *client) imageList(ctx context.Context, r dockerobs.Request) dockerobs.R
 		if d.SharedSize > 0 {
 			summary.SharedSize = &d.SharedSize
 		}
-		if d.UniqueSize > 0 {
-			summary.UniqueSize = &d.UniqueSize
-		}
 		if d.Containers > 0 {
 			summary.ContainerRefs = &d.Containers
 		}
@@ -318,7 +313,7 @@ func (c *client) imageList(ctx context.Context, r dockerobs.Request) dockerobs.R
 		}
 		out = append(out, summary)
 	}
-	return dockerobs.Response{Images: out, Negotiated: c.negotiated, Truncated: truncated}
+	return dockerobs.Response{Images: out, Truncated: truncated}
 }
 
 func (c *client) volumeList(ctx context.Context) dockerobs.Response {
@@ -347,7 +342,7 @@ func (c *client) volumeList(ctx context.Context) dockerobs.Response {
 			Anonymous: d.Labels["com.docker.volume.anonymous"] == "true",
 		})
 	}
-	return dockerobs.Response{Volumes: out, Negotiated: c.negotiated, Truncated: truncated}
+	return dockerobs.Response{Volumes: out, Truncated: truncated}
 }
 
 func (c *client) networkList(ctx context.Context) dockerobs.Response {
@@ -372,7 +367,7 @@ func (c *client) networkList(ctx context.Context) dockerobs.Response {
 		}
 		out = append(out, summary)
 	}
-	return dockerobs.Response{Networks: out, Negotiated: c.negotiated, Truncated: truncated}
+	return dockerobs.Response{Networks: out, Truncated: truncated}
 }
 
 func (c *client) diskUsage(ctx context.Context) dockerobs.Response {
@@ -433,5 +428,5 @@ func (c *client) diskUsage(ctx context.Context) dockerobs.Response {
 		count := len(d.BuildCache)
 		out.BuildCacheItems = &count
 	}
-	return dockerobs.Response{Usage: &out, Negotiated: c.negotiated}
+	return dockerobs.Response{Usage: &out}
 }
