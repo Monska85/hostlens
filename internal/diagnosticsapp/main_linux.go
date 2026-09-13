@@ -84,7 +84,11 @@ func Main(args []string) error {
 	b := make([]byte, 12)
 	rand.Read(b)
 	s := backend.New(snap, load, func(s backend.Snapshot) contract.Collector {
-		return &linux.Collector{Config: s.Config, Policy: s.Policy}
+		c := &linux.Collector{Config: s.Config, Policy: s.Policy}
+		if s.Config.Docker.Enabled {
+			c.Docker = linux.NewObserverClient(s.Config.Docker.ObserverSocket)
+		}
+		return c
 	}, hex.EncodeToString(b))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

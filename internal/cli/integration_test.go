@@ -51,7 +51,7 @@ func TestSeparateProcessesAndDocumentedCLI(t *testing.T) {
 		}
 		return b
 	}
-	for _, args := range [][]string{{"--help"}, {"version"}, {"serve", "--help"}, {"token", "create", "--help"}, {"install", "--help"}, {"upgrade", "--help"}, {"uninstall", "--help"}} {
+	for _, args := range [][]string{{"--help"}, {"version"}, {"serve", "--help"}, {"token", "create", "--help"}, {"install", "--help"}, {"upgrade", "--help"}, {"uninstall", "--help"}, {"reconcile", "--help"}} {
 		run(args...)
 	}
 	cfg := config.DefaultsLinux(false)

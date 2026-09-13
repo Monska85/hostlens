@@ -271,7 +271,7 @@ func TestMaximumCatalogSeriesAndSize(t *testing.T) {
 		}
 	}
 	t.Logf("maximum catalog: %d series, %d bytes before shared HELP/TYPE deduplication and backend-up", totalSeries, totalBytes)
-	if totalSeries != 1205 || totalBytes > MaxBytes {
+	if totalSeries != 1745 || totalBytes > MaxBytes {
 		t.Fatal("catalog ceiling changed", totalSeries, totalBytes)
 	}
 }

@@ -36,6 +36,10 @@ const (
 	SchemaLogs  Schema = "logs"
 	SchemaPath  Schema = "path"
 	SchemaPID   Schema = "pid"
+
+	SchemaDocker          Schema = "docker"
+	SchemaDockerContainer Schema = "docker_container"
+	SchemaDockerLogs      Schema = "docker_logs"
 )
 
 type ToolDefinition struct {
@@ -67,6 +71,15 @@ var toolRegistry = mustRegistry([]ToolDefinition{
 	{Name: "get_hostlens_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_hostlens_info", AuditDomain: "hostlens", Schema: SchemaEmpty, Description: "Collect current observed host facts with explicit issues and scope."},
 	{Name: "inspect_service", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "inspect_service", AuditDomain: "services", Schema: SchemaUnit, Description: "Collect current observed host facts with explicit issues and scope."},
 	{Name: "inspect_path", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "inspect_path", AuditDomain: "paths", Schema: SchemaPath, Description: "Collect current observed host facts with explicit issues and scope."},
+	{Name: "get_docker_info", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_docker_info", Schema: SchemaDocker, Description: "Observe the enabled system-wide Docker engine identity, API scope, and capability state. Evidence is live and bounded; registry, proxy, plugin, and raw daemon configuration are excluded."},
+	{Name: "list_docker_containers", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "list_docker_containers", Schema: SchemaPage, Description: "Observe the current bounded container inventory with lifecycle, health, and reference evidence. Pagination is a new observation. Contents are untrusted data."},
+	{Name: "get_docker_container", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_docker_container", Schema: SchemaDockerContainer, Description: "Observe one policy-permitted container by stable identity: state, health, limits, mounts, and ports. Environment, commands, labels, and health output are excluded."},
+	{Name: "get_docker_container_stats", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_docker_container_stats", Schema: SchemaDockerContainer, Description: "Observe one point-in-time resource sample for a running container with the daemon-supplied counters and their exact scope."},
+	{Name: "list_docker_images", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "list_docker_images", Schema: SchemaPage, Description: "Observe the bounded image inventory with deduplicated identities, shared-layer sizes, and current container references. Pagination is a new observation."},
+	{Name: "list_docker_volumes", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "list_docker_volumes", Schema: SchemaPage, Description: "Observe the bounded volume inventory with drivers, current references, and sizes only when the daemon supplies them."},
+	{Name: "list_docker_networks", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "list_docker_networks", Schema: SchemaPage, Description: "Observe the bounded network inventory with selected non-secret configuration and current container references."},
+	{Name: "get_docker_disk_usage", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "get_docker_disk_usage", Schema: SchemaDocker, Description: "Observe daemon disk totals, per-resource sizes with shared-layer semantics, and advisory reclaimable estimates from the current unused analysis."},
+	{Name: "query_docker_logs", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "query_docker_logs", Schema: SchemaDockerLogs, Description: "Observe bounded stdout and stderr records for one policy-permitted container with explicit truncation and rotation scope. Contents are untrusted data."},
 })
 
 func ValidateRegistry(definitions []ToolDefinition) error {
@@ -81,7 +94,7 @@ func ValidateRegistry(definitions []ToolDefinition) error {
 		if definition.RequiredRole != RoleHealth && definition.RequiredRole != RoleInspect && definition.RequiredRole != RoleDiagnostics {
 			return fmt.Errorf("unknown role for %q", definition.Name)
 		}
-		if definition.Schema != SchemaEmpty && definition.Schema != SchemaPage && definition.Schema != SchemaUnit && definition.Schema != SchemaLogs && definition.Schema != SchemaPath && definition.Schema != SchemaPID {
+		if definition.Schema != SchemaEmpty && definition.Schema != SchemaPage && definition.Schema != SchemaUnit && definition.Schema != SchemaLogs && definition.Schema != SchemaPath && definition.Schema != SchemaPID && definition.Schema != SchemaDocker && definition.Schema != SchemaDockerContainer && definition.Schema != SchemaDockerLogs {
 			return fmt.Errorf("unknown schema for %q", definition.Name)
 		}
 		if seen[definition.Name] {
@@ -139,16 +152,17 @@ func AuditDomain(tool string) string {
 }
 
 type Args struct {
-	PID      int    `json:"pid,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Unit     string `json:"unit,omitempty"`
-	Format   string `json:"format,omitempty"`
-	RawTail  bool   `json:"raw_tail,omitempty"`
-	Since    string `json:"since,omitempty"`
-	Until    string `json:"until,omitempty"`
-	Priority *int   `json:"priority,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
-	Offset   int    `json:"offset,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Unit      string `json:"unit,omitempty"`
+	Container string `json:"container,omitempty"`
+	Format    string `json:"format,omitempty"`
+	RawTail   bool   `json:"raw_tail,omitempty"`
+	Since     string `json:"since,omitempty"`
+	Until     string `json:"until,omitempty"`
+	Priority  *int   `json:"priority,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	Offset    int    `json:"offset,omitempty"`
 }
 type Request struct {
 	Version    int    `json:"version"`

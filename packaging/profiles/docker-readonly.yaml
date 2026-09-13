@@ -1,0 +1,13 @@
+# Example Docker diagnostics grants. This profile is not included by the
+# base policy: inactive grants never affect access decisions. Copy the
+# wanted lines into an active profile after enabling and reconciling the
+# Docker observer, and remove anything you do not intend to grant.
+profiles: []
+allow:
+  # Collection forms grant one inventory or aggregate observation each.
+  docker: [daemon, containers, images, volumes, networks, disk_usage]
+  # Item forms scope stable IDs and current names; stats and logs remain
+  # separate authorities from container metadata.
+  # docker: [container/*, stats/*, logs/*, image/*, volume/*, network/*]
+deny:
+  docker: []

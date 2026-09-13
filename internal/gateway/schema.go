@@ -17,6 +17,12 @@ func inputSchema(tool contract.ToolDefinition) map[string]any {
 		fields, required = []string{"pid"}, []string{"pid"}
 	case contract.SchemaPage:
 		fields = []string{"offset", "limit"}
+	case contract.SchemaDocker:
+	case contract.SchemaDockerContainer:
+		fields, required = []string{"container"}, []string{"container"}
+	case contract.SchemaDockerLogs:
+		fields = []string{"container", "since", "until", "limit"}
+		required = []string{"container"}
 	case contract.SchemaLogs:
 		fields = []string{"path", "unit", "format", "raw_tail", "since", "until", "priority", "limit"}
 		schema["oneOf"] = []any{map[string]any{"required": []string{"path"}}, map[string]any{"required": []string{"unit"}}}
@@ -24,7 +30,7 @@ func inputSchema(tool contract.ToolDefinition) map[string]any {
 	for _, name := range fields {
 		field := map[string]any{"type": "string"}
 		switch name {
-		case "path", "unit":
+		case "path", "unit", "container":
 			field["minLength"] = 1
 		case "pid":
 			field["type"] = "integer"

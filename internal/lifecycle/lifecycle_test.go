@@ -75,12 +75,12 @@ func setup(t *testing.T) (Manager, string, *systemFixture) {
 	if err := os.Mkdir(filepath.Join(source, "profiles"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"hostlens", "hostlens-diagnostics"} {
+	for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer"} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte("old executable"), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"nginx", "allow-all"} {
+	for _, name := range []string{"nginx", "allow-all", "docker-readonly"} {
 		if err := os.WriteFile(filepath.Join(source, "profiles", name+".yaml"), []byte("profiles: []\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +184,7 @@ func archive(t *testing.T, files map[string][]byte, mutate func(*Release)) strin
 }
 func TestArchiveVerification(t *testing.T) {
 	files := func() map[string][]byte {
-		return map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend")}
+		return map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend"), "hostlens-docker-observer": []byte("observer")}
 	}
 	for _, tt := range []struct {
 		name   string
@@ -217,7 +217,7 @@ func TestUpgradePreservesPolicyAndTracksPrevious(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(m.path("/etc/hostlens/config.yaml"))
-	bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend"), "profiles/nginx.yaml": []byte("allow:\n  files: [/**]\n")}, nil)
+	bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend"), "hostlens-docker-observer": []byte("new observer"), "profiles/nginx.yaml": []byte("allow:\n  files: [/**]\n")}, nil)
 	if e := m.Upgrade(context.Background(), bundle); e != nil {
 		t.Fatal(e)
 	}
@@ -299,7 +299,7 @@ func TestFailedActivationRestoresBinariesAndMetadata(t *testing.T) {
 				}
 				return sys.run(ctx, name, args...)
 			}
-			bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend")}, nil)
+			bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend"), "hostlens-docker-observer": []byte("new observer")}, nil)
 			err := m.Upgrade(context.Background(), bundle)
 			if err == nil || (resetFailure && !strings.Contains(err.Error(), "reset rejected")) {
 				t.Fatalf("activation or reset failure hidden: %v", err)
@@ -318,6 +318,84 @@ func TestFailedActivationRestoresBinariesAndMetadata(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRollbackRemovesReplacedObserverWhenPreviouslyAbsent(t *testing.T) {
+	m, source, sys := setup(t)
+	if e := m.Install(context.Background(), source, false); e != nil {
+		t.Fatal(e)
+	}
+	// A release upgrade from a disabled integration leaves no observer
+	// binary; the upgrade restores it from the archive and a failed
+	// activation must remove it again, with the manifest agreeing.
+	if e := os.Remove(m.path("/usr/local/bin/hostlens-docker-observer")); e != nil {
+		t.Fatal(e)
+	}
+	limited := false
+	failedStarts := 0
+	m.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		if name == "systemctl" {
+			switch {
+			case strings.HasPrefix(joined, "show --property=ActiveState"):
+				if failedStarts > 0 && args[len(args)-1] == "hostlens-gateway.service" {
+					return []byte("failed\n"), nil
+				}
+				return []byte("active\n"), nil
+			case strings.HasPrefix(joined, "is-active"):
+				return nil, nil
+			case joined == "start hostlens-gateway.service":
+				if failedStarts == 0 {
+					failedStarts++
+					return nil, errors.New("candidate exhausted service start limit")
+				}
+				return nil, nil
+			case strings.HasPrefix(joined, "reset-failed"):
+				limited = false
+				return nil, nil
+			case joined == "restart hostlens-gateway.service" && limited:
+				return nil, errors.New("start-limit-hit")
+			}
+		}
+		return sys.run(ctx, name, args...)
+	}
+	bundle := archive(t, map[string][]byte{"hostlens": []byte("new executable"), "hostlens-diagnostics": []byte("new backend"), "hostlens-docker-observer": []byte("new observer")}, nil)
+	if err := m.Upgrade(context.Background(), bundle); err == nil {
+		t.Fatal("activation failure hidden")
+	}
+	if _, e := os.Stat(m.path("/usr/local/bin/hostlens-docker-observer")); !errors.Is(e, os.ErrNotExist) {
+		t.Fatal("rollback left a previously-absent observer binary")
+	}
+	man, e := m.Load()
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, r := range man.Resources {
+		if r.Path == "/usr/local/bin/hostlens-docker-observer" && r.State != "removed" {
+			t.Fatalf("observer record not marked removed: %s", r.State)
+		}
+	}
+	// A later upgrade that succeeds adopts the observer with ownership.
+	bundle2 := archive(t, map[string][]byte{"hostlens": []byte("newer executable"), "hostlens-diagnostics": []byte("newer backend"), "hostlens-docker-observer": []byte("newer observer")}, nil)
+	if err := m.Upgrade(context.Background(), bundle2); err != nil {
+		t.Fatal(err)
+	}
+	man, e = m.Load()
+	if e != nil {
+		t.Fatal(e)
+	}
+	found := false
+	for _, r := range man.Resources {
+		if r.Path == "/usr/local/bin/hostlens-docker-observer" && r.Owned && r.State == "complete" && r.Hash != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("successful upgrade did not adopt the observer binary")
+	}
+	if b, e := os.ReadFile(m.path("/usr/local/bin/hostlens-docker-observer")); e != nil || string(b) != "newer observer" {
+		t.Fatalf("observer binary not restored by upgrade: %v %s", e, b)
 	}
 }
 
@@ -518,7 +596,7 @@ func TestUpgradeStopFailureRestoresRunningServices(t *testing.T) {
 		}
 		return sys.run(ctx, name, args...)
 	}
-	bundle := archive(t, map[string][]byte{"hostlens": []byte("new"), "hostlens-diagnostics": []byte("new backend")}, nil)
+	bundle := archive(t, map[string][]byte{"hostlens": []byte("new"), "hostlens-diagnostics": []byte("new backend"), "hostlens-docker-observer": []byte("new observer")}, nil)
 	if err := m.Upgrade(context.Background(), bundle); err == nil {
 		t.Fatal("stop failure hidden")
 	}
@@ -543,7 +621,7 @@ func TestUpgradeStopFailureRestoresRunningServices(t *testing.T) {
 func TestArchiveRejectsDamagedGzipTrailer(t *testing.T) {
 	for _, missing := range []int{1, 8} {
 		t.Run(strconv.Itoa(missing), func(t *testing.T) {
-			p := archive(t, map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend")}, nil)
+			p := archive(t, map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend"), "hostlens-docker-observer": []byte("observer")}, nil)
 			b, err := os.ReadFile(p)
 			if err != nil {
 				t.Fatal(err)
@@ -556,7 +634,7 @@ func TestArchiveRejectsDamagedGzipTrailer(t *testing.T) {
 			}
 		})
 	}
-	p := archive(t, map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend")}, nil)
+	p := archive(t, map[string][]byte{"hostlens": []byte("binary"), "hostlens-diagnostics": []byte("backend"), "hostlens-docker-observer": []byte("observer")}, nil)
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
@@ -586,7 +664,7 @@ func TestUpgradeUnknownStatePreservesInstallation(t *testing.T) {
 				}
 				return sys.run(ctx, name, args...)
 			}
-			bundle := archive(t, map[string][]byte{"hostlens": []byte("new"), "hostlens-diagnostics": []byte("new backend")}, nil)
+			bundle := archive(t, map[string][]byte{"hostlens": []byte("new"), "hostlens-diagnostics": []byte("new backend"), "hostlens-docker-observer": []byte("new observer")}, nil)
 			if err := m.Upgrade(context.Background(), bundle); err == nil {
 				t.Fatal("unknown state accepted")
 			}

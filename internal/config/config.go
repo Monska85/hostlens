@@ -7,6 +7,8 @@ import (
 	"io"
 	"math"
 	"net/netip"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/Monska85/hostlens/internal/contract"
@@ -17,6 +19,7 @@ type Rules struct {
 	Audit   []string `yaml:"audit"`
 	Files   []string `yaml:"files"`
 	Journal []string `yaml:"journal"`
+	Docker  []string `yaml:"docker"`
 }
 type Profile struct {
 	Profiles []string `yaml:"profiles"`
@@ -75,9 +78,16 @@ type Metrics struct {
 type MCP struct {
 	ReadOnly bool `yaml:"read_only"`
 }
+type Docker struct {
+	Enabled        bool   `yaml:"enabled"`
+	DaemonSocket   string `yaml:"daemon_socket"`
+	ObserverSocket string `yaml:"observer_socket"`
+	Group          string `yaml:"group"`
+}
 type Config struct {
 	MCP             MCP     `yaml:"mcp"`
 	Metrics         Metrics `yaml:"metrics"`
+	Docker          Docker  `yaml:"docker"`
 	Profile         `yaml:",inline"`
 	Version         int      `yaml:"version"`
 	Mode            string   `yaml:"mode"`
@@ -118,6 +128,9 @@ func validate(c Config) error {
 	}
 	if c.Remediation.Enabled {
 		return errors.New("remediation is unavailable in v1")
+	}
+	if e := validateDocker(c); e != nil {
+		return e
 	}
 	if c.Mode != "system" && c.Mode != "user" {
 		return errors.New("mode must be system or user")
@@ -194,6 +207,75 @@ func validate(c Config) error {
 }
 
 func defaults() Config {
-	c := Config{MCP: MCP{ReadOnly: true}, Metrics: Metrics{Enabled: true}, Version: 1, Mode: "user", Privilege: "restricted", Server: Server{Bind: []string{"127.0.0.1"}, Port: 8080, ClientIPHeader: "X-Forwarded-For"}, Limits: Limits{10 * time.Second, 4, 65536, 200, 15 * time.Minute, 24 * time.Hour, 131072, 1048576, 65536, 200, 30 * time.Second, 1000, 2 * time.Second}, Health: Health{Threshold{1, 2}, time.Second, []string{"memory", "swap", "filesystem", "services", "load", "cpu"}, nil, Threshold{80, 95}, Threshold{1, 2}}, Logging: Logging{"info", true}}
+	c := Config{MCP: MCP{ReadOnly: true}, Metrics: Metrics{Enabled: true}, Version: 1, Mode: "user", Privilege: "restricted", Server: Server{Bind: []string{"127.0.0.1"}, Port: 8080, ClientIPHeader: "X-Forwarded-For"}, Limits: Limits{10 * time.Second, 4, 65536, 200, 15 * time.Minute, 24 * time.Hour, 131072, 1048576, 65536, 200, 30 * time.Second, 1000, 2 * time.Second}, Health: Health{Threshold{1, 2}, time.Second, []string{"memory", "swap", "filesystem", "services", "load", "cpu"}, nil, Threshold{80, 95}, Threshold{1, 2}}, Logging: Logging{"info", true}, Docker: Docker{Group: "docker"}}
 	return c
+}
+
+// validateDocker enforces the opt-in Docker surface: disabled by default,
+// local Unix sockets only, distinct IPC resources, and system installation.
+// Configured paths are validated even while disabled so reconciliation can
+// prepare an enabled-waiting installation, but they carry no runtime
+// authority until the administrator enables and reconciles the topology.
+func validateDocker(c Config) error {
+	d := c.Docker
+	if d.Enabled && c.Mode != "system" {
+		return errors.New("docker diagnostics require system installation")
+	}
+	if d.DaemonSocket != "" {
+		if e := localUnixSocket(d.DaemonSocket, "docker daemon socket"); e != nil {
+			return e
+		}
+	}
+	if d.ObserverSocket != "" {
+		if e := localUnixSocket(d.ObserverSocket, "docker observer socket"); e != nil {
+			return e
+		}
+		if d.ObserverSocket == d.DaemonSocket {
+			// HostLens must never bind or shadow the Docker control path:
+			// reconciliation would own the daemon socket until Docker
+			// returns, and the observer would dial its own IPC endpoint.
+			return errors.New("docker observer socket must differ from the daemon socket")
+		}
+		if d.ObserverSocket == c.Socket || d.ObserverSocket == c.AdminSocket || c.Socket == c.AdminSocket {
+			return errors.New("docker observer IPC path collides with an existing socket")
+		}
+	}
+	if d.Enabled {
+		if d.DaemonSocket == "" || d.ObserverSocket == "" {
+			return errors.New("enabled docker diagnostics require the daemon and observer socket paths")
+		}
+		if d.Group == "" {
+			return errors.New("docker group is required for process-scoped observer access")
+		}
+	}
+	if d.Group != "" && !validGroupName(d.Group) {
+		return errors.New("invalid docker access group name")
+	}
+	return nil
+}
+
+func localUnixSocket(p, label string) error {
+	if !path.IsAbs(p) || path.Clean(p) != p {
+		return fmt.Errorf("%s must be an absolute clean local path", label)
+	}
+	// Only filesystem Unix sockets are supported. TCP, SSH, TLS, named
+	// pipes, and proxy schemes are rejected as unsupported transports.
+	if strings.ContainsAny(p, ":\\") {
+		return fmt.Errorf("%s must be a local filesystem path without transport schemes", label)
+	}
+	return nil
+}
+
+func validGroupName(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return s[0] != '-' && s[0] != '.' && !strings.HasPrefix(s, "__")
 }

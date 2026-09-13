@@ -35,6 +35,84 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 WantedBy=multi-user.target
 `
 }
+
+// ObserverSocketUnit exposes the observer IPC endpoint through socket
+// activation. The socket stays listening independently of the observer
+// service so a later Docker installation activates the next request without
+// another reconciliation; the service remains gated by its Requisite.
+// The socket belongs to the diagnostic backend identities, and the observer
+// still rejects peers by UID, so an unrelated local process with group
+// access is rejected before Docker access.
+func ObserverSocketUnit(c config.Config) string {
+	quoted := strings.ReplaceAll(c.Docker.ObserverSocket, `"`, `\"`)
+	return fmt.Sprintf(`[Unit]
+Description=HostLens Docker observer IPC socket
+# Docker daemon restarts must never permanently disable activation: a
+# request arriving while Docker is down fails its Requisite check, and the
+# next request after Docker returns must activate the observer again.
+StartLimitIntervalSec=0
+[Socket]
+ListenStream=%s
+SocketUser=hostlens-diagnostics
+SocketGroup=hostlens-gateway
+SocketMode=0660
+RemoveOnStop=yes
+# Activation attempts while Docker is down must never trip the socket
+# trigger limit and permanently disable the endpoint.
+TriggerLimitIntervalSec=0
+[Install]
+WantedBy=sockets.target
+`, quoted)
+}
+
+// ObserverUnit runs the isolated observer. Docker group authority is
+// process-scoped only: SupplementaryGroups= grants access to the running
+// service without persistent account membership. The dependency direction
+// guarantees HostLens never starts, stops, or restarts Docker. The service
+// inherits the activated IPC socket and needs no filesystem writes, and the
+// sandbox matches the repository baseline for privileged processes.
+func ObserverUnit(c config.Config) string {
+	group := strings.ReplaceAll(c.Docker.Group, `"`, `\"`)
+	return fmt.Sprintf(`[Unit]
+Description=HostLens isolated Docker observer
+Requisite=docker.service
+After=docker.service
+PartOf=docker.service
+# Docker daemon restarts propagate stop/restart here. Keep the observer
+# available across daemon upgrade cycles instead of tripping the default
+# start-rate limit.
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+User=hostlens-observer
+Group=hostlens-observer
+SupplementaryGroups=%s
+ExecStart=/usr/local/bin/hostlens-docker-observer serve --system
+Restart=on-failure
+RestartSec=2
+UMask=0027
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service openat2
+SystemCallFilter=~@mount @reboot @swap @raw-io
+CapabilityBoundingSet=
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+[Install]
+WantedBy=multi-user.target
+`, group)
+}
 func DiagnosticsUnit(c config.Config) string {
 	cap := ""
 	if c.Privilege == "standard" {

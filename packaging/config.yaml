@@ -8,3 +8,15 @@ mcp:
 metrics:
   enabled: true
   allow_anonymous: false
+
+# Docker diagnostics are opt-in and disabled by default. After setting
+# enabled to true, run `hostlens reconcile --system` to provision the
+# isolated observer, then grant Docker resources through a profile.
+# The daemon socket must be a rootful system-wide engine socket owned by
+# root with the listed access group; rootless and remote engines are
+# unsupported.
+# docker:
+#   enabled: true
+#   daemon_socket: /var/run/docker.sock
+#   observer_socket: /run/hostlens/docker-observer.sock
+#   group: docker

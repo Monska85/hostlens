@@ -60,7 +60,7 @@ func (c *Coordinator) Level() slog.Level {
 }
 func RestartFingerprint(s backend.Snapshot) (string, error) {
 	c := s.Config
-	values := []any{c.Server, c.Mode, c.Privilege, c.TokenStore, c.Socket, c.AdminSocket, c.GatewayUser, c.DiagnosticsUser, c.Limits.IdleTimeout}
+	values := []any{c.Server, c.Mode, c.Privilege, c.TokenStore, c.Socket, c.AdminSocket, c.GatewayUser, c.DiagnosticsUser, c.Limits.IdleTimeout, c.Docker}
 	if c.Server.TLS.Enabled {
 		for _, p := range []string{c.Server.TLS.KeyFile, c.Server.TLS.CertFile} {
 			b, e := os.ReadFile(p)

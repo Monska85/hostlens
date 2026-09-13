@@ -187,3 +187,94 @@ func (p *Policy) Fingerprint() string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
+
+// DockerDenied reports whether an active deny rule matches one resource
+// form. Callers use it to evaluate every practical identity form of an item
+// (stable IDs, current names, tags) before projecting it.
+func (p *Policy) DockerDenied(kind, selector string) bool {
+	return p.deniesDocker(kind, selector, "")
+}
+
+// DockerKindDenied reports whether an active deny rule covers an entire item
+// class, so no observation of that class may start.
+func (p *Policy) DockerKindDenied(kind string) bool {
+	probe := kind + "/" + strings.Repeat("0", 64)
+	for _, r := range p.Rules {
+		if r.Inactive || !r.Deny || r.Category != "docker" {
+			continue
+		}
+		if p.semantics.matches(r, probe) {
+			return true
+		}
+	}
+	return false
+}
+
+// DockerDecision evaluates one resource across its requested selector and the
+// resolved stable identity. Every allow and deny rule that matches either
+// form applies, and denial wins. A denied container also excludes that
+// container's stats and logs regardless of stats or log grants. An empty
+// selector means identity-only evaluation.
+func (p *Policy) DockerDecision(kind, selector, id string) bool {
+	if p.deniesDocker(kind, selector, id) {
+		return false
+	}
+	if kind == "stats" || kind == "logs" {
+		if p.deniesDocker("container", selector, id) {
+			return false
+		}
+	}
+	if !p.Allowed("docker", kind+"/"+id, false) {
+		// A name allow still authorizes the resolved identity; denial
+		// already won above when either form was denied.
+		if !(selector != "" && selector != id && p.Allowed("docker", kind+"/"+selector, false)) {
+			return false
+		}
+	}
+	return true
+}
+
+// DockerListDecision evaluates one inventory item for list membership. A
+// collection grant authorizes listing; item forms refine both allow and
+// deny, and denial wins across stable IDs and current names.
+func (p *Policy) DockerListDecision(kind, selector, id, collection string) bool {
+	if p.deniesDocker(kind, selector, id) {
+		return false
+	}
+	if p.Allowed("docker", kind+"/"+id, false) {
+		return true
+	}
+	if selector != "" && selector != id && p.Allowed("docker", kind+"/"+selector, false) {
+		return true
+	}
+	return p.Allowed("docker", collection, false)
+}
+
+func (p *Policy) deniesDocker(kind, selector, id string) bool {
+	for _, form := range []string{kind + "/" + id, kind + "/" + selector} {
+		if form == "" || strings.HasSuffix(form, "/") {
+			continue
+		}
+		for _, r := range p.Rules {
+			if r.Inactive || !r.Deny || r.Category != "docker" {
+				continue
+			}
+			if p.semantics.matches(r, form) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ActiveKinds returns the sorted resource classes covered by active allow
+// rules of one category. Inactive provenance and deny rules grant nothing.
+func (p *Policy) ActiveKinds(category string) []string {
+	var patterns []string
+	for _, r := range p.Rules {
+		if r.Category == category && !r.Inactive && !r.Deny {
+			patterns = append(patterns, r.Pattern)
+		}
+	}
+	return DockerKinds(patterns)
+}

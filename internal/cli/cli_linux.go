@@ -27,7 +27,7 @@ import (
 func flags(name string) *flag.FlagSet { return flag.NewFlagSet(name, flag.ContinueOnError) }
 func Main(args []string) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Println("HostLens " + contract.Version + "\nCommands: serve, config validate, policy explain PATH, status, reload, token create|list|update|revoke|rotate, install, upgrade, uninstall, version\nUse COMMAND --help for flags. Every command accepts --config PATH and --system where applicable.")
+		fmt.Println("HostLens " + contract.Version + "\nCommands: serve, config validate, policy explain PATH, reconcile --system, status, reload, token create|list|update|revoke|rotate, install, upgrade, uninstall, version\nUse COMMAND --help for flags. Every command accepts --config PATH and --system where applicable.")
 		return nil
 	}
 	if args[0] == "version" {
@@ -36,6 +36,9 @@ func Main(args []string) error {
 	}
 	if args[0] == "install" || args[0] == "upgrade" || args[0] == "uninstall" {
 		return lifecycleCLI(args)
+	}
+	if args[0] == "reconcile" {
+		return reconcileCLI(args)
 	}
 	cmd := args[0]
 	rest := args[1:]
@@ -233,13 +236,28 @@ func explain(s backend.Snapshot, configPath, target string, recursive bool, uid 
 			}
 		}
 	}
+	entries := []map[string]any{}
+	truncated := false
+	traversalIssues := []string{}
+	// Docker resource targets are policy identities, not filesystem paths.
+	// They explain every matching allow and deny rule with provenance and
+	// the resolved decision, without claiming any path resolution.
+	if dockerTarget, ok := strings.CutPrefix(target, "docker:"); ok {
+		decision := "denied"
+		if s.Policy.Allowed("docker", dockerTarget, false) {
+			decision = "allowed"
+		}
+		entries = append(entries, map[string]any{
+			"target":   target,
+			"decision": decision,
+			"matches":  s.Policy.Matches("docker", dockerTarget),
+		})
+		return output(map[string]any{"comparison": comparison, "evaluates": "effective docker policy and MCP read-only setting; not OS access", "config": configPath, "fingerprint": s.Fingerprint, "mcp_read_only": s.Config.MCP.ReadOnly, "instance": live, "entries": entries, "truncated": truncated, "traversal_issues": traversalIssues})
+	}
 	target, e := filepath.Abs(target)
 	if e != nil {
 		return e
 	}
-	entries := []map[string]any{}
-	truncated := false
-	traversalIssues := []string{}
 	inspect := func(p string) {
 		resolved, e := filepath.EvalSymlinks(p)
 		decision := "denied"

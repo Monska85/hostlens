@@ -63,8 +63,29 @@ func main() {
 		fmt.Println("HTTP listener: ready")
 		return
 	}
+	// list-tools mode: TOKEN_JSON list-tools PRESENT|ABSENT TOOL
+	if len(os.Args) == 5 && os.Args[2] == "list-tools" {
+		b, e := os.ReadFile(os.Args[1])
+		if e != nil {
+			panic(e)
+		}
+		var token struct {
+			Secret string `json:"secret"`
+		}
+		if e = json.Unmarshal(b, &token); e != nil {
+			panic(e)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := listTools(ctx, endpoint, token.Secret, os.Args[3], os.Args[4]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("list-tools: passed")
+		return
+	}
 	if len(os.Args) != 4 && (len(os.Args) != 5 || os.Args[4] != "--expect-error") {
-		panic("usage: smoke --ready | TOKEN_JSON TOOL EXPECTED_VALUE [--expect-error]")
+		panic("usage: smoke --ready | TOKEN_JSON TOOL EXPECTED_VALUE [--expect-error] | TOKEN_JSON list-tools PRESENT|ABSENT TOOL")
 	}
 	b, e := os.ReadFile(os.Args[1])
 	if e != nil {
@@ -83,6 +104,66 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(os.Args[2] + ": passed")
+}
+
+// listTools verifies that discovery carries or omits one tool name. Docker
+// diagnostics unavailable through the observer must be omitted from
+// discovery rather than admitted as a failing tool.
+func listTools(ctx context.Context, endpoint, secret, expectation, tool string) error {
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	out, err := io.ReadAll(io.LimitReader(response.Body, 262144))
+	response.Body.Close()
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != 200 {
+		return fmt.Errorf("tools/list failed with HTTP %d", response.StatusCode)
+	}
+	var payload struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+		Error any `json:"error"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return err
+	}
+	if payload.Error != nil {
+		return fmt.Errorf("tools/list returned an error: %v", payload.Error)
+	}
+	found := false
+	for _, listed := range payload.Result.Tools {
+		if listed.Name == tool {
+			found = true
+		}
+	}
+	switch expectation {
+	case "PRESENT":
+		if !found {
+			return fmt.Errorf("%s missing from discovery", tool)
+		}
+	case "ABSENT":
+		if found {
+			return fmt.Errorf("%s unexpectedly discoverable", tool)
+		}
+	default:
+		return fmt.Errorf("expectation must be PRESENT or ABSENT")
+	}
+	return nil
 }
 
 func smoke(ctx context.Context, endpoint, secret, tool, expected string, expectError bool) error {

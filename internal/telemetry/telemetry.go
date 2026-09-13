@@ -266,7 +266,7 @@ func DecodeBackend(reader io.Reader) ([]*dto.MetricFamily, error) {
 		default:
 			return nil, errors.New("unexpected telemetry family")
 		}
-		if f.Type == nil || f.GetType() != kind || len(f.Metric) == 0 || len(f.Metric) > 19*len(outcomes) || len(f.GetHelp()) > 128 {
+		if f.Type == nil || f.GetType() != kind || len(f.Metric) == 0 || len(f.Metric) > (len(contract.ToolNames())+1)*len(outcomes) || len(f.GetHelp()) > 128 {
 			return nil, errors.New("invalid telemetry family")
 		}
 		series := map[string]bool{}

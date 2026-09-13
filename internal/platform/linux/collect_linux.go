@@ -87,6 +87,7 @@ type Collector struct {
 	Policy         *policy.Policy
 	Root           string
 	Runner         Runner
+	Docker         DockerObserver
 }
 
 func (c *Collector) file(path string, builtin bool) ([]byte, error) {
@@ -109,6 +110,12 @@ func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
 	}
 	m := map[string]bool{}
 	for _, t := range contract.ToolNames() {
+		if _, dockerTool := dockerToolKinds[t]; dockerTool {
+			// Docker tool availability is decided exclusively by the
+			// observer, engine, and grant state below; the preset must not
+			// leak Docker tools on disabled or ungranted installations.
+			continue
+		}
 		m[t] = true
 		if domain := contract.AuditDomain(t); domain != "" {
 			m[t] = c.Policy.Allowed("audit", domain, false)
@@ -128,6 +135,9 @@ func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
 	}
 	_, _, _, packageErr := c.packageCommand()
 	m["list_packages"] = packageErr == nil
+	for tool, value := range c.dockerCapabilities(ctx) {
+		m[tool] = value
+	}
 	return m
 }
 func (c *Collector) result() contract.Result {
@@ -142,6 +152,9 @@ func (c *Collector) Collect(ctx context.Context, tool string, a contract.Args) c
 		r := contract.Failure("cancelled_or_timeout")
 		r.Truncated = true
 		return r
+	}
+	if _, dockerTool := dockerToolKinds[tool]; dockerTool {
+		return c.docker(ctx, tool, a)
 	}
 	r := c.result()
 	if domain := contract.AuditDomain(tool); domain != "" {

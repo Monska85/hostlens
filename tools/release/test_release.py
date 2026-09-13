@@ -42,8 +42,10 @@ class PreparationTests(unittest.TestCase):
         self.root = pathlib.Path(temporary.name)
         for name in (
             "packaging/profiles/nginx.yaml",
+            "packaging/profiles/docker-readonly.yaml",
             "packaging/config.yaml",
             "docs/v1/OPERATIONS.md",
+            "docs/v1/INSTALL.md",
             "docs/v1/VALIDATION.md",
             "LICENSE",
             "NOTICE",
@@ -71,7 +73,7 @@ class PreparationTests(unittest.TestCase):
         for arch in prepare.ARCHITECTURES:
             stage = prepare.OUT / ("linux-" + arch)
             stage.mkdir(parents=True)
-            for name in ("hostlens", "hostlens-diagnostics"):
+            for name in ("hostlens", "hostlens-diagnostics", "hostlens-docker-observer"):
                 (stage / name).write_bytes(b"binary")
 
     def test_fresh_manifest_and_dependency_notices(self):

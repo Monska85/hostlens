@@ -107,7 +107,7 @@ func Extract(archive, dest, architecture string) (Release, error) {
 			return release, errors.New("archive checksum mismatch")
 		}
 	}
-	for _, name := range []string{"hostlens", "hostlens-diagnostics"} {
+	for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer"} {
 		if !seen[name] {
 			return release, errors.New("archive executable missing")
 		}

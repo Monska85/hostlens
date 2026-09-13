@@ -202,8 +202,77 @@ if [ "${mode}" = standard ]; then
   printf 'fixture: visible\n' >/opt/hostlens-fixture.conf
   chmod 0644 /opt/hostlens-fixture.conf
 fi
+printf '%s\n' 'HOSTLENS_STAGE: verify Docker observer reconciliation'
+# Disabled by default: no observer identity, units, or authority.
+assert_fails getent group hostlens-observer
+test ! -e /etc/systemd/system/hostlens-docker-observer.service
+hostlens reconcile --system >/tmp/reconcile-disabled-plan.json
+test ! -e /etc/systemd/system/hostlens-docker-observer.service
+assert_fails getent group hostlens-observer
+# Enable Docker diagnostics; the daemon is absent in this container, so
+# reconciliation must reach the enabled-waiting state without Docker. The
+# installed configuration already carries the disabled section; enable it
+# in place. The docker block is addressed by its own top-level key so the
+# unrelated TLS enabled flag stays untouched.
+sed -i '/^docker:/,/^    group: / s/    enabled: false/    enabled: true/' /etc/hostlens/config.yaml
+hostlens config validate --system >/tmp/validate-docker.json
+hostlens reconcile --system >/tmp/reconcile-docker-plan.json
+# The dry-run plan must not provision anything.
+test ! -e /etc/systemd/system/hostlens-docker-observer.service
+assert_fails getent group hostlens-observer
+hostlens reconcile --system --apply >/tmp/reconcile-docker-applied.json
+getent group hostlens-observer
+getent passwd hostlens-observer
+test -x /usr/local/bin/hostlens-docker-observer
+test -e /etc/systemd/system/hostlens-docker-observer.socket
+test -e /etc/systemd/system/hostlens-docker-observer.service
+# The container has no Docker engine: a never-started stub unit satisfies
+# the observer's Requisite= reference for verification without HostLens
+# ever starting, stopping, or restarting it.
+printf '[Unit]\nDescription=Docker engine stub (never started)\n[Service]\nType=oneshot\nExecStart=/bin/true\nRemainAfterExit=yes\n' >/etc/systemd/system/docker.service
+systemctl daemon-reload
+systemd-analyze verify /etc/systemd/system/hostlens-docker-observer.service /etc/systemd/system/hostlens-docker-observer.socket
+systemctl is-active --quiet hostlens-docker-observer.socket
+# The observer service stays dormant: Docker is absent, and no HostLens
+# action starts, stops, or restarts Docker.
+assert_fails systemctl is-active --quiet docker.service
+assert_fails systemctl is-active --quiet hostlens-docker-observer.service
+# Docker topology settings are restart-only: the running services adopt the
+# section through a restart, then reload must reject the changed topology.
+sed -i 's/group: docker/group: wheel/' /etc/hostlens/config.yaml
+assert_fails hostlens reload --system
+sed -i 's/group: wheel/group: docker/' /etc/hostlens/config.yaml
+systemctl restart hostlens-diagnostics.service hostlens-gateway.service
+ready
+hostlens reload --system >/tmp/reload.json
+# Docker tools stay omitted from discovery while no Docker grant is active
+# or the observer cannot reach an engine; the smoke helper verifies
+# discovery instead of expecting a failing direct call.
+/opt/hostlens-smoke /tmp/token.json list-tools ABSENT get_docker_info
+# The dormant observer identity holds no persistent Docker membership.
+if groups hostlens-observer 2>/dev/null | grep -q docker; then
+  printf '%s\n' 'dormant observer identity gained persistent Docker membership' >&2
+  exit 1
+fi
+# Disablement removes the configured intent first, adopts it through a
+# restart, and only then removes the owned units and socket without
+# touching Docker.
+# Remove the configured intent; the running services adopt it on restart.
+sed -i '/^docker:/,/^    group: /d' /etc/hostlens/config.yaml
+systemctl restart hostlens-diagnostics.service hostlens-gateway.service
+ready
+/opt/hostlens-smoke /tmp/token.json list-tools ABSENT get_docker_info
+hostlens reconcile --system --apply >/tmp/reconcile-remove.json
+test ! -e /etc/systemd/system/hostlens-docker-observer.service
+test ! -e /etc/systemd/system/hostlens-docker-observer.socket
+assert_fails systemctl is-active --quiet hostlens-docker-observer.socket
+getent passwd hostlens-observer
+printf '%s\n' 'Docker observer lifecycle (Docker absent): passed'
 printf '%s\n' 'HOSTLENS_STAGE: upgrade on configured endpoint'
 # Upgrade readiness must follow the installed configuration, not defaults.
+# The preceding Docker stage restarted the services; clear the recorded
+# restart history so the upgrade restart cannot trip the rate limit.
+systemctl reset-failed hostlens-diagnostics.service hostlens-gateway.service 2>/dev/null || true
 sed -i 's/port: 8080/port: 18080/' /etc/hostlens/config.yaml
 systemctl restart hostlens-diagnostics.service hostlens-gateway.service
 export HOSTLENS_SMOKE_ENDPOINT=http://127.0.0.1:18080/mcp

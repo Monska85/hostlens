@@ -40,7 +40,10 @@ type Manifest struct {
 	Resources []Resource `json:"resources"`
 }
 type Manager struct {
-	Root   string
+	Root string
+	// Source optionally points at an extracted release directory for
+	// reconciliation of installations that predate the observer binary.
+	Source string
 	Run    func(context.Context, string, ...string) ([]byte, error)
 	Config config.Config
 }
@@ -187,7 +190,7 @@ func (m Manager) Plan(source string) (Manifest, error) {
 			man.Resources = append(man.Resources, Resource{Path: name, Kind: kind, State: state})
 		}
 	}
-	for _, p := range []string{"/usr/local/bin/hostlens", "/usr/local/bin/hostlens-diagnostics", "/etc/hostlens/config.yaml", "/etc/hostlens/profiles/nginx.yaml", "/etc/hostlens/profiles/allow-all.yaml", "/etc/systemd/system/hostlens-gateway.service", "/etc/systemd/system/hostlens-diagnostics.service"} {
+	for _, p := range []string{"/usr/local/bin/hostlens", "/usr/local/bin/hostlens-diagnostics", "/usr/local/bin/hostlens-docker-observer", "/etc/hostlens/config.yaml", "/etc/hostlens/profiles/nginx.yaml", "/etc/hostlens/profiles/allow-all.yaml", "/etc/hostlens/profiles/docker-readonly.yaml", "/etc/systemd/system/hostlens-gateway.service", "/etc/systemd/system/hostlens-diagnostics.service"} {
 		if _, e := os.Lstat(m.path(p)); e == nil {
 			return man, fmt.Errorf("installation conflict: %s", p)
 		}
@@ -196,7 +199,7 @@ func (m Manager) Plan(source string) (Manifest, error) {
 	for _, p := range []string{"/etc/hostlens/secrets/tokens.json", "/etc/hostlens/secrets/tokens.json.lock", "/run/hostlens/diagnostics.sock", "/run/hostlens/admin.sock"} {
 		man.Resources = append(man.Resources, Resource{Path: p, Kind: "state", Mutable: true, Owned: true})
 	}
-	for _, name := range []string{"hostlens", "hostlens-diagnostics"} {
+	for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer"} {
 		if st, e := os.Stat(filepath.Join(source, name)); e != nil || !st.Mode().IsRegular() {
 			return man, fmt.Errorf("source binary missing: %s", name)
 		}
@@ -258,7 +261,7 @@ func (m Manager) Install(ctx context.Context, source string, start bool) error {
 			var b []byte
 			mode := os.FileMode(0644)
 			switch r.Path {
-			case "/usr/local/bin/hostlens", "/usr/local/bin/hostlens-diagnostics":
+			case "/usr/local/bin/hostlens", "/usr/local/bin/hostlens-diagnostics", "/usr/local/bin/hostlens-docker-observer":
 				b, e = os.ReadFile(filepath.Join(source, filepath.Base(r.Path)))
 				mode = 0755
 			case "/etc/hostlens/config.yaml":
@@ -331,7 +334,7 @@ func (m Manager) Uninstall(ctx context.Context) error {
 		return e
 	}
 	var failures []error
-	for _, svc := range []string{"hostlens-gateway.service", "hostlens-diagnostics.service"} {
+	for _, svc := range []string{"hostlens-gateway.service", "hostlens-diagnostics.service", "hostlens-docker-observer.service", "hostlens-docker-observer.socket"} {
 		var unit *Resource
 		for i := range man.Resources {
 			r := &man.Resources[i]
@@ -535,7 +538,7 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		return fmt.Errorf("candidate config validation failed: %w", e)
 	}
 	active := map[string]bool{}
-	for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service"} {
+	for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service", "hostlens-docker-observer.service"} {
 		b, err := m.command(ctx, "systemctl", "show", "--property=ActiveState", "--value", svc)
 		if err != nil {
 			return fmt.Errorf("cannot determine state of %s: %w", svc, err)
@@ -554,10 +557,25 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		return e
 	}
 	man.Resources = append(man.Resources, Resource{Path: strings.TrimPrefix(backup, m.Root), Kind: "directory", Owned: true, State: "complete"})
-	for _, name := range []string{"hostlens", "hostlens-diagnostics"} {
+	// The observer binary may be absent when Docker diagnostics are
+	// disabled; upgrades keep the rest of the artifact set coherent and
+	// restore the observer from the archive unconditionally.
+	presentObserver := true
+	if _, e := os.Stat(m.path(observerBinary)); errors.Is(e, os.ErrNotExist) {
+		presentObserver = false
+	}
+	for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer"} {
 		b, e := os.ReadFile(m.path("/usr/local/bin/" + name))
 		if e != nil {
-			return e
+			if !errors.Is(e, os.ErrNotExist) {
+				return e
+			}
+			// Only the observer may be absent: the other executables are
+			// always installed.
+			if name != "hostlens-docker-observer" {
+				return e
+			}
+			continue
 		}
 		p := filepath.Join(backup, name)
 		man.Resources = append(man.Resources, Resource{Path: strings.TrimPrefix(p, m.Root), Kind: "file", Owned: true, State: "intent", Hash: digest(b)})
@@ -569,6 +587,18 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		}
 		man.Resources[len(man.Resources)-1].State = "complete"
 	}
+	// An absent observer binary records its removal durably so a rollback
+	// leaves the manifest consistent with the restored filesystem state.
+	if !presentObserver {
+		for i := range man.Resources {
+			if man.Resources[i].Path == observerBinary && man.Resources[i].Kind == "file" {
+				man.Resources[i].State = "removed"
+			}
+		}
+		if e = m.save(&man); e != nil {
+			return e
+		}
+	}
 	man.State = "upgrading"
 	if e = m.save(&man); e != nil {
 		return e
@@ -577,8 +607,21 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		var failures []error
-		for _, name := range []string{"hostlens", "hostlens-diagnostics"} {
+		for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer"} {
 			b, e := os.ReadFile(filepath.Join(backup, name))
+			if errors.Is(e, os.ErrNotExist) && name == "hostlens-docker-observer" {
+				// The observer was absent before the upgrade; the rollback
+				// removes the replaced binary so no stray executable stays.
+				if e = os.Remove(m.path("/usr/local/bin/" + name)); e != nil && !errors.Is(e, os.ErrNotExist) {
+					failures = append(failures, e)
+				}
+				for i := range man.Resources {
+					if man.Resources[i].Path == "/usr/local/bin/"+name {
+						man.Resources[i].State = "removed"
+					}
+				}
+				continue
+			}
 			if e == nil {
 				e = token.Atomic(m.path("/usr/local/bin/"+name), b, 0755)
 				for i := range man.Resources {
@@ -591,7 +634,7 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 				failures = append(failures, e)
 			}
 		}
-		for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service"} {
+		for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service", "hostlens-docker-observer.service"} {
 			if active[svc] {
 				// A crashing candidate can exhaust systemd's start-rate limit.
 				// Allow one recovery attempt with the restored executable.
@@ -621,7 +664,7 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		}
 		return errors.Join(append([]error{cause}, failures...)...)
 	}
-	for _, svc := range []string{"hostlens-gateway.service", "hostlens-diagnostics.service"} {
+	for _, svc := range []string{"hostlens-gateway.service", "hostlens-diagnostics.service", "hostlens-docker-observer.service"} {
 		if active[svc] {
 			if _, e = m.command(ctx, "systemctl", "stop", svc); e != nil {
 				return rollback(e)
@@ -629,7 +672,7 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		}
 	}
 
-	for _, name := range []string{"hostlens", "hostlens-diagnostics"} {
+	for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer"} {
 		b, e := os.ReadFile(filepath.Join(stage, name))
 		if e != nil {
 			return rollback(e)
@@ -637,13 +680,24 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 		if e = token.Atomic(m.path("/usr/local/bin/"+name), b, 0755); e != nil {
 			return rollback(e)
 		}
+		// The archive always carries the observer; upgrades adopt or update
+		// its ownership record so uninstall never preserves a stray binary.
+		recorded := false
 		for i := range man.Resources {
 			if man.Resources[i].Path == "/usr/local/bin/"+name {
 				man.Resources[i].Hash = digest(b)
+				if name == "hostlens-docker-observer" {
+					man.Resources[i].Owned = true
+					man.Resources[i].State = "complete"
+				}
+				recorded = true
 			}
 		}
+		if name == "hostlens-docker-observer" && !recorded {
+			man.Resources = append(man.Resources, Resource{Path: "/usr/local/bin/" + name, Kind: "file", Owned: true, State: "complete", Hash: digest(b)})
+		}
 	}
-	for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service"} {
+	for _, svc := range []string{"hostlens-diagnostics.service", "hostlens-gateway.service", "hostlens-docker-observer.service"} {
 		if active[svc] {
 			if _, e = m.command(ctx, "systemctl", "start", svc); e != nil {
 				return rollback(e)
@@ -680,6 +734,20 @@ func (m Manager) ready(ctx context.Context, svc string) error {
 	if m.Run != nil {
 		_, e := m.command(ctx, "systemctl", "is-active", "--quiet", svc)
 		return e
+	}
+	if svc == "hostlens-docker-observer.service" {
+		// The observer is socket-activated and serves no /status endpoint;
+		// readiness means its unit is running.
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		b, e := m.command(ctx, "systemctl", "show", "--property=ActiveState", "--value", svc)
+		if e != nil {
+			return e
+		}
+		if strings.TrimSpace(string(b)) != "active" {
+			return fmt.Errorf("%s activation readiness failed", svc)
+		}
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

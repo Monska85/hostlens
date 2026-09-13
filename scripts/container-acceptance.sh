@@ -46,9 +46,9 @@ for arch in amd64 arm64; do
     -o "/tmp/build/${arch}/" ./cmd/...
 done
 printf '%s\n' 'HOSTLENS_STAGE: check portable build boundaries'
-# Shared protocol and policy packages must remain free of native runtime APIs.
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./internal/contract ./internal/config ./internal/policy ./internal/token ./internal/backend ./internal/gateway
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./internal/contract ./internal/config ./internal/policy ./internal/token ./internal/backend ./internal/gateway
+# Shared protocol, policy and observer contracts must remain free of native runtime APIs.
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./internal/contract ./internal/config ./internal/policy ./internal/token ./internal/backend ./internal/gateway ./internal/dockerobs
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./internal/contract ./internal/config ./internal/policy ./internal/token ./internal/backend ./internal/gateway ./internal/dockerobs
 test -z "$(gofmt -l cmd internal tools)"
 
 printf '%s\n' 'HOSTLENS_STAGE: test release utilities'

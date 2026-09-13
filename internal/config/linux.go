@@ -19,6 +19,8 @@ func DefaultsLinux(system bool) Config {
 		run = "/run/hostlens"
 		c.GatewayUser = "hostlens-gateway"
 		c.DiagnosticsUser = "hostlens-diagnostics"
+		c.Docker.DaemonSocket = "/var/run/docker.sock"
+		c.Docker.ObserverSocket = path.Join(run, "docker-observer.sock")
 	}
 	c.ProfileDirs = []string{path.Join(base, "profiles")}
 	c.TokenStore = path.Join(base, "secrets/tokens.json")

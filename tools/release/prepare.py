@@ -70,6 +70,7 @@ def prepare(value):
         for source, name in (
             ("packaging/config.yaml", "config.example.yaml"),
             ("docs/v1/OPERATIONS.md", "OPERATIONS.md"),
+            ("docs/v1/INSTALL.md", "INSTALL.md"),
             ("docs/v1/VALIDATION.md", "VALIDATION.md"),
             ("LICENSE", "LICENSE"),
             ("NOTICE", "NOTICE.txt"),
@@ -101,7 +102,11 @@ def prepare(value):
         (target / "release.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         for path in target.rglob("*"):
             if path.is_file():
-                path.chmod(0o755 if path.name in ("hostlens", "hostlens-diagnostics") else 0o644)
+                path.chmod(
+                    0o755
+                    if path.name in ("hostlens", "hostlens-diagnostics", "hostlens-docker-observer")
+                    else 0o644
+                )
 
 
 if __name__ == "__main__":

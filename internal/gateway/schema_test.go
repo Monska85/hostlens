@@ -86,7 +86,7 @@ func TestToolArgumentContracts(t *testing.T) {
 		if tool.InputSchema.AdditionalProperties {
 			t.Fatal("unrelated properties accepted", tool.Name)
 		}
-		if strings.HasPrefix(tool.Name, "get_") && tool.Name != "get_service_status" && tool.Name != "get_process_info" && len(tool.InputSchema.Properties) != 0 {
+		if strings.HasPrefix(tool.Name, "get_") && tool.Name != "get_service_status" && tool.Name != "get_process_info" && tool.Name != "get_docker_container" && tool.Name != "get_docker_container_stats" && len(tool.InputSchema.Properties) != 0 {
 			t.Fatal("observation tool advertises irrelevant arguments", tool.Name)
 		}
 	}
@@ -115,6 +115,15 @@ func TestToolArgumentContracts(t *testing.T) {
 		{"ambiguous log source", "query_logs", `{"path":"/var/log/example","unit":"example.service"}`, false},
 		{"raw log", "query_logs", `{"path":"/var/log/example","raw_tail":true}`, true},
 		{"journal", "query_logs", `{"unit":"example.service","priority":3}`, true},
+		{"docker info empty", "get_docker_info", `{}`, true},
+		{"docker info extra", "get_docker_info", `{"container":"x"}`, false},
+		{"docker container missing", "get_docker_container", `{}`, false},
+		{"docker container", "get_docker_container", `{"container":"abc"}`, true},
+		{"docker stats empty", "get_docker_container_stats", `{}`, false},
+		{"docker disk usage extra", "get_docker_disk_usage", `{"limit":1}`, false},
+		{"docker logs missing", "query_docker_logs", `{}`, false},
+		{"docker logs", "query_docker_logs", `{"container":"abc","limit":5}`, true},
+		{"docker logs format", "query_docker_logs", `{"container":"abc","format":"jsonl"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls.Load()
