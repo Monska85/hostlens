@@ -8,6 +8,7 @@ HostLens gives agents controlled access to host diagnostics through the Model Co
 
 - **Inspect:** OS identity, hardware inventory, resource health, services, and installed packages.
 - **Audit:** Explicitly authorized process, network, account, storage, security, metadata and deployment evidence through generic tools.
+- **Observe Docker:** Opt-in, read-only evidence from the local system-wide Docker Engine through an isolated observer with a typed GET-only contract.
 - **Read approved sources:** Bounded UTF-8 configuration files, JSONL logs, raw tails, and selected journal units.
 - **Control access:** Expiring tokens, role checks on each call, profile includes, and global denial precedence.
 - **Operate locally:** Explicit installation, policy reload, token administration, recoverable upgrades, and tracked removal.
@@ -16,7 +17,7 @@ The gateway and diagnostic backend run as separate processes and identities. The
 
 ## Start here
 
-Read [operator instructions](docs/v1/OPERATIONS.md) to install and configure a host, and [validation evidence](docs/v1/VALIDATION.md) for tested behavior and remaining limits. The MCP endpoint defaults to `http://127.0.0.1:8080/mcp`; bearer authentication remains required on loopback.
+Read the [installation guide](docs/v1/INSTALL.md) to install and configure a host, [operator instructions](docs/v1/OPERATIONS.md) for day-two reference, and [validation evidence](docs/v1/VALIDATION.md) for tested behavior and remaining limits. The MCP endpoint defaults to `http://127.0.0.1:8080/mcp`; bearer authentication remains required on loopback.
 
 Choose diagnostic privilege deliberately:
 

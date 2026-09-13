@@ -14,15 +14,16 @@ Diagnostic evidence is collection-worker-scoped. Collectors read live sources on
 
 ## Components and trust
 
-| Component   | Responsibility                                                                    | Boundary                                                                    |
-| ----------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Gateway     | Streamable HTTP, bearer verification, roles, MCP dispatch, audit, service metrics | Unprivileged service identity; access to token state and TLS key            |
-| Diagnostics | Source authorization, collection, assessment, budgets                             | Separate identity; optional standard-mode read capability                   |
-| Local CLI   | Tokens, policy explanation, reload/status, installation and upgrades              | Local administrator or owning-user authority; never granted by an MCP token |
+| Component        | Responsibility                                                                    | Boundary                                                                    |
+| ---------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Gateway          | Streamable HTTP, bearer verification, roles, MCP dispatch, audit, service metrics | Unprivileged service identity; access to token state and TLS key            |
+| Diagnostics      | Source authorization, collection, assessment, budgets                             | Separate identity; optional standard-mode read capability                   |
+| Docker observer  | Isolated system-wide Engine observations over a typed GET-only contract           | Dedicated non-login identity with process-scoped socket-group authority     |
+| Local CLI        | Tokens, policy explanation, reload/status, installation and upgrades              | Local administrator or owning-user authority; never granted by an MCP token |
 
-Gateway and backend communicate through structured local IPC with peer-identity checks. Each call carries a generation; the backend rejects inconsistent generations. Source policies are immutable snapshots, and status reports their cached fingerprint and generation together.
+Gateway and backend communicate through structured local IPC with peer-identity checks. The diagnostic backend alone reaches the Docker observer through a second typed IPC endpoint whose peer check rejects every other identity. Each call carries a generation; the backend rejects inconsistent generations. Source policies are immutable snapshots, and status reports their cached fingerprint and generation together.
 
-Reload validates both components before activating new policy, assessment settings, and limits. Listener, TLS, credential-location, identity, and privilege changes require restart. In-flight calls may finish under their original generation. An unresolved restart mismatch fails closed.
+Reload validates both components before activating new policy, assessment settings, and limits. Listener, TLS, credential-location, identity, privilege, and Docker observer topology changes require restart. In-flight calls may finish under their original generation. An unresolved restart mismatch fails closed.
 
 Standard mode grants only `CAP_DAC_READ_SEARCH` to diagnostics through systemd. Restricted mode grants no additional capability. Both enforce policy, isolate configured gateway secrets, and constrain writes, devices, and networking; neither profiles nor read-only mounts fully contain a compromised broad-read process.
 
@@ -41,6 +42,8 @@ Token expiry, revocation, and role changes apply to subsequent requests and are 
 Return observed values only. Missing optional measurements are omitted; failed collection produces structured issues alongside valid partial observations. Fatal execution failures set MCP `isError`. Health severity and coverage completeness are independent, so incomplete coverage cannot establish health.
 
 Service and package lists paginate without claiming snapshot consistency. File configuration reads return complete bounded UTF-8 content or fail. Log queries select one source and report parser, time window, ordering, truncation, and retention limitations. Raw tails establish no event-time coverage. Log and configuration content is always untrusted data.
+
+Docker tools require the `diagnostics` role, an active `docker` policy grant, the isolated observer, and a compatible engine. Collection forms grant inventories; item forms grant one resource class, with stats and logs separate from container metadata. Denial wins across stable IDs and current names. Evidence is live and stateless; unused-resource analysis is advisory and never claims a duration. See [Docker diagnostics](OPERATIONS.md#docker-diagnostics) for the operator contract.
 
 ## Source policy and budgets
 
@@ -74,6 +77,7 @@ Do not add unused abstractions to anticipate these implementations. Share behavi
 | Tool arguments and information fidelity | [MCP diagnostics](../../openspec/specs/mcp-diagnostics/spec.md)                 |
 | Health severity and coverage            | [Health assessment](../../openspec/specs/health-assessment/spec.md)             |
 | Profiles and safe source access         | [Access policy](../../openspec/specs/access-policy/spec.md)                     |
+| Docker diagnostics                      | [Docker diagnostics](../../openspec/specs/docker-diagnostics/spec.md)           |
 | Reload and policy explanation           | [Configuration lifecycle](../../openspec/specs/configuration-lifecycle/spec.md) |
 | Credentials and roles                   | [Token authorization](../../openspec/specs/token-authorization/spec.md)         |
 | HTTP, TLS, proxies, and admission       | [Network transport](../../openspec/specs/network-transport/spec.md)             |

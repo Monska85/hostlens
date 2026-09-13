@@ -4,6 +4,8 @@ HostLens is a local implementation candidate for Linux amd64 and arm64. It expos
 
 ## Prerequisites
 
+For a step-by-step first installation on a new host, follow the [installation guide](INSTALL.md). This reference assumes the services are installed.
+
 Linux amd64 or arm64, systemd for managed installation, and kernel 5.6 or later with `openat2` are required. Archives contain static Go binaries and dependency notices. Build and test procedures live in the repository's `docs/RELEASING.md`.
 
 ## Install and configure
@@ -24,7 +26,7 @@ The installer creates separate non-login `hostlens-gateway` and `hostlens-diagno
 
 Standard mode uses `--privilege standard`. It gives only the diagnostic service `CAP_DAC_READ_SEARCH`, which bypasses ordinary file read/search permissions and carries broad confidentiality risk. It does not grant arbitrary writes, shell access through MCP, or immunity to mandatory access controls. Restricted mode adds no capability; inaccessible observations remain explicit issues.
 
-Review `/etc/hostlens/config.yaml` and installed profiles before starting. Fresh installations include no active file or journal grants. Bundled `nginx` and `allow-all` profiles remain inactive until explicitly referenced. Source denials override every profile and every built-in observation grant.
+Review `/etc/hostlens/config.yaml` and installed profiles before starting. Fresh installations include no active file or journal grants. Bundled `nginx`, `allow-all`, and `docker-readonly` profiles remain inactive until explicitly referenced. Installation also places the dormant `hostlens-docker-observer` executable without any Docker authority; reconciliation provisions its identity and units only after you enable the integration. Source denials override every profile and every built-in observation grant.
 
 `config.example.yaml` in the archive (repository: `packaging/config.yaml`) is a minimal configuration; omitted fields use built-in defaults. Additional fields include `profile_dirs`, `token_store`, `socket`, `admin_socket`, `gateway_user`, `diagnostics_user`, and `server.allowed_origins`. System identities are fixed in v1. YAML rejects unknown fields and active remediation settings. System-service policy files and their parents must be root-controlled and not writable by unrelated identities.
 
@@ -121,7 +123,7 @@ Histograms use upper bounds `0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 
 
 Gateway and backend call counters are separate boundary observations: do not sum both components to count user calls. Transport/authentication rejection does not invent a tool execution. Backend rejection can occur before collection, and a gateway call may fail before reaching the backend. Tool timeout counters describe the returned result; active backend work may remain nonzero afterward. HTTP counters include only `/mcp` and enabled `/metrics`; a scrape's completed HTTP outcome becomes visible in a later scrape.
 
-The fixed catalog permits at most 1,205 exposed series across both components, including histogram series and all tool/outcome/gap combinations. Unused counter/vector combinations are absent until observed. Unsupported Go measurements and non-Linux native process measurements are omitted. No generic Prometheus default/global collectors, build labels or application exporters are registered.
+The fixed catalog permits at most 1,745 exposed series across both components, including histogram series and all tool/outcome/gap combinations. Unused counter/vector combinations are absent until observed. Unsupported Go measurements and non-Linux native process measurements are omitted. No generic Prometheus default/global collectors, build labels or application exporters are registered.
 
 Before downgrading to a binary without metrics support, use the current CLI to remove `metrics` from all token role sets. For metrics-only tokens, revoke them first, then update their inactive role metadata to `health`; updating roles does not reactivate a revoked token. After cleaning token metadata, remove the `metrics` configuration section, and then downgrade both services together. Older unknown-role/unknown-field checks remain strict.
 
@@ -139,7 +141,7 @@ systemctl kill --kill-whom=main --signal=HUP hostlens-gateway.service
 
 Explanation evaluates disk policy plus the active MCP read-only setting and prints `MATCH`, `DIFFERENT`, or `UNKNOWN` against an identified local instance. It shows matching origins, inclusion chains, inactive rules, and resolution status. A match proves effective policy equivalence only; it does not prove OS readability, full configuration equality, or blanket descendant access.
 
-Reload validates the complete candidate in both processes. `mcp.read_only` is reloadable. A transition to read-only mode closes future remediation admission before activation; diagnostics already admitted under their generation can finish. Listener, TLS material, identity, credential-location, privilege, and connection idle-timeout changes require restart; a mixed reload fails without partially applying the file. If a backend restart cannot restore the gateway's active validated generation from disk, calls remain unavailable until configuration consistency is restored. Status reports the read-only value, effective fingerprint, and generation together.
+Reload validates the complete candidate in both processes. `mcp.read_only` is reloadable. A transition to read-only mode closes future remediation admission before activation; diagnostics already admitted under their generation can finish. Listener, TLS material, identity, credential-location, privilege, Docker observer settings, and connection idle-timeout changes require restart; a mixed reload fails without partially applying the file. If a backend restart cannot restore the gateway's active validated generation from disk, calls remain unavailable until configuration consistency is restored. Status reports the read-only value, effective fingerprint, and generation together.
 
 Before downgrading to a binary that predates `mcp.read_only`, remove the `mcp` section from configuration with the current binary, validate the result, and downgrade both services together. Older binaries reject the unknown field rather than silently ignoring the safety setting.
 
@@ -172,6 +174,8 @@ Explicit `raw_tail: true` returns a bounded physical tail without verified event
 | HTTP request bytes / idle timeout                  | 65,536 / 30 seconds   |
 | Inventory page / explanation count                 | 200 / 1,000           |
 | Explanation deadline / CPU sample                  | 2 seconds / 1 second  |
+
+Docker observation ceilings are fixed in the observer contract, not configurable: 5,000 items per container/image/volume inventory, 1,000 networks, 16 MiB per list or disk-usage response, 256 KiB per daemon info, container inspect, or stats response, 8 MiB and 10,000 records per log response, 64 KiB per IPC request, and 4 concurrent observations with one dedicated disk-usage slot. The verified Engine API range is 1.41 through 1.51; newer compatible daemons negotiate down to the tested ceiling.
 
 Response ceilings include the SDK's text and structured representations. Gateway admission bounds HTTP work before authentication; excess requests receive HTTP 503. Timeout and cancellation return explicit issues. A blocked OS read retains its backend admission slot and only its transient request-scoped evidence until the worker finishes; it cannot supply a later request. This prevents unbounded abandoned work without claiming synchronous memory erasure for uninterruptible kernel I/O.
 
@@ -228,6 +232,89 @@ Configuration input is capped at 1 MiB per file, profile directories at 1,024 en
 ### Ownership checks during uninstall
 
 Uninstall preserves accounts and groups when ownership scanning fails, including when root cannot traverse desktop FUSE mounts such as GVFS or document portals. An ownership-check failure does not prove that unrelated owned files exist. Resolve the inaccessible mount or end the affected user session, then retry uninstall. Do not bypass the check by deleting the account manually on a production host.
+
+## Docker diagnostics
+
+Docker diagnostics are opt-in and disabled by default. They expose bounded, read-only evidence from the local rootful system-wide Docker Engine on Linux through an isolated `hostlens-docker-observer` process. Rootless Docker, remote engines, Docker Desktop, Swarm administration, Kubernetes, Podman, and other container runtimes remain unsupported.
+
+**Authority warning:** the Docker Unix socket grants root-equivalent control to the process that opens it, and Docker provides no read-only socket permission. Access to that socket therefore sits in a separately built, separately supervised observer identity with a typed, GET-only observation contract. The gateway and diagnostic backend never receive the Docker socket, Docker group membership, or a generic Docker API pass-through. Every observation request is a fixed GET; the daemon records the full transcript in acceptance tests.
+
+### Enable and reconcile
+
+```sh
+# 1. Append the docker section to /etc/hostlens/config.yaml.
+# 2. Validate and plan without mutation:
+hostlens config validate --system
+hostlens reconcile --system
+# 3. Review the plan. It discloses root-equivalent observer authority,
+#    the socket, the group, and every identity, unit, and file change.
+# 4. Apply:
+hostlens reconcile --system --apply
+# 5. Restart the services so the running configuration activates:
+systemctl restart hostlens-diagnostics.service hostlens-gateway.service
+```
+
+Reconciliation creates a dedicated non-login identity (`hostlens-observer`), adopts the observer binary placed by installation, writes the observer service and socket units, and enables the socket unit. Upgrading from a release that predates the observer needs `--source` with the extracted release (see below). Docker group authority is process-scoped: the service declares `SupplementaryGroups=` for the configured socket group and no persistent account membership is ever added. The service declares `Requisite=docker.service`, `After=docker.service`, and `PartOf=docker.service`, so a diagnostic request can activate the observer only while Docker is active, and no HostLens action starts, stops, restarts, or reconfigures Docker.
+
+Runtime states are honest and separate:
+
+- **disabled:** no Docker authority or tools.
+- **enabled-waiting:** reconciliation provisioned the topology but the daemon socket is absent or the engine is stopped. Installing and starting Docker later lets the next diagnostic request activate the observer without another reconciliation.
+- **available:** the observer reached a compatible engine (Engine API floor 1.41; newer compatible daemons negotiate the tested maximum).
+- **unavailable:** the observer cannot access the socket, the daemon stopped, the engine is incompatible, or the daemon reports an unsupported mode such as rootless or Docker Desktop.
+
+A stopped or removed daemon stops the observer through the declared dependency without clearing configured intent. A nonstandard socket or group produces an actionable unavailable status: update `daemon_socket` or `group` in configuration and rerun reconciliation.
+
+### Policy grants
+
+Docker resources use the `docker` policy category. Collection forms grant one inventory or aggregate observation each; item forms scope stable identities and current names. Denial wins across stable IDs, current names, and list membership, and a denied container also excludes that container's stats and logs.
+
+```yaml
+allow:
+  docker: [daemon, containers, disk_usage]
+  # Item forms: container/<name-or-id-or-glob>, stats/*, logs/*,
+  # image/*, volume/*, network/*
+deny:
+  docker: [container/db, logs/db]
+```
+
+`hostlens policy explain --system docker:container/web` explains every matching rule with its provenance and resolved decision. Inactive example grants in `docker-readonly.yaml` never affect decisions until copied into an active profile.
+
+### Tool contracts and exclusions
+
+| Tool                         | Evidence                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| `get_docker_info`            | Engine version, negotiated API scope, storage/cgroup/log drivers, counts, capability state        |
+| `list_docker_containers`     | Bounded live inventory: identity, lifecycle, health, ports, mounts, references                     |
+| `get_docker_container`       | One permitted container: state, restart count, limits, mounts, log driver, no health output       |
+| `get_docker_container_stats` | One point-in-time sample with daemon-supplied counters and their exact scope                       |
+| `list_docker_images`         | Deduplicated identities, tags, digests, shared-layer sizes, current container references           |
+| `list_docker_volumes`        | Names, drivers, current references, sizes only when the daemon supplies them                       |
+| `list_docker_networks`       | Identity, driver, scope, selected non-secret configuration, current references                     |
+| `get_docker_disk_usage`      | Daemon disk totals, per-resource sizes, advisory reclaimable estimates from the unused analysis    |
+| `query_docker_logs`          | Bounded stdout/stderr records with explicit truncation, rotation scope, and driver gaps            |
+
+Lists accept `offset` and `limit`, sort by full stable identity, and state that the next page is a new observation. Container tools require one `container` selector; name selectors resolve to the full immutable identity, policy is evaluated against both forms, and the resolved identity is re-verified before evidence is returned, so name reuse releases nothing for an unauthorized replacement.
+
+Never exposed: environment values, commands and arguments, unrestricted labels, registry authentication, secrets, configs, plugin data, proxy values, raw health-check output, raw inspect objects, mounted content, or any Docker mutation (exec, attach, copy, events, build, prune, pull, push, tag, lifecycle control). A generic Docker request tool does not exist; every request is fixed in the observer.
+
+### Live-data and unused-resource semantics
+
+Every result is calculated from live daemon responses within the request. Nothing is retained between requests: no inventories, log records, stats history, cleanup candidates, or last-use estimates. A second request always re-reads the daemon.
+
+Unused classification uses only the completed observation: an image or volume is `currently_unused` only when no container references it, including stopped containers. Dangling remains a separate daemon fact. Creation time is reported when supplied but never mapped to `unused_since` or `unused_duration`: Docker supplies no trustworthy last-reference time, so last-use evidence is reported unavailable. Cleanup candidates are advisory evidence with an observation-stability check; racing inventory changes suppress certainty and are reported as `non_atomic_observation`.
+
+### Troubleshooting
+
+- `docker_disabled`: the configuration section is missing or `enabled` is false.
+- `docker_unavailable`: the observer is not provisioned, Docker is stopped or absent, the socket is missing, or peer validation refused access. Check `systemctl status hostlens-docker-observer.socket`, the configured `daemon_socket` and `group`, and rerun reconciliation after any change.
+- `unsupported_engine`: the daemon reports rootless, Docker Desktop, or another unsupported mode; HostLens keeps Docker tools unavailable.
+- `driver_gap`: the container's log driver cannot serve records through the daemon interface; this does not establish that no logs or incidents exist.
+- `non_atomic_observation`: Docker changed during inventory correlation; unused claims are suppressed and results stay advisory.
+
+### Disable, uninstall, and downgrade
+
+`hostlens reconcile --system --apply` with the section disabled or removed stops and disables the observer, removes its owned units, socket, and binary, and leaves the dormant account without Docker group authority. Uninstall removes all owned observer resources while preserving every Docker resource, container, image, volume, network, and daemon configuration. Upgrading from a release that predates the observer does not install the new binary (the running release performs the upgrade), so run `hostlens reconcile --system --apply --source /path/to/extracted-release` once after enabling the section; reconciliation restores the binary and records ownership. Downgrading to a build without the `docker` section requires removing the section first: an older binary rejects it as unknown. Upgrade and rollback never restart Docker.
 
 ## Generic server and application audits
 
