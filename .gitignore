@@ -32,3 +32,6 @@ __pycache__/
 /hostlens-smoke
 /smoke
 /hostlens-containment
+
+# Local plan and scratch files.
+/tmp/
