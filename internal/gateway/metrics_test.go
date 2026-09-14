@@ -247,6 +247,27 @@ func TestMetricsOnlyCannotDiscoverOrExecuteTools(t *testing.T) {
 		}
 	}
 }
+func TestMetricsAcceptsBearerSchemeSpellings(t *testing.T) {
+	t.Parallel()
+
+	c, _, store := metricsCoordinator(t)
+	_, secret, err := store.Create("scraper", []string{"metrics"}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range []string{"Bearer", "bearer", "BEARER"} {
+		if w := scrapeRequest(c, "GET", spelling+" "+secret); w.Code != 200 {
+			t.Fatalf("%s scheme rejected: %d %s", spelling, w.Code, w.Body.String())
+		}
+		waitScrape(t, c)
+	}
+	for _, tc := range []struct{ auth string }{{""}, {"Basic " + secret}, {"Bearer " + secret + " extra"}, {"bearer"}} {
+		if w := scrapeRequest(c, "GET", tc.auth); w.Code != 401 {
+			t.Fatalf("malformed credential accepted: %q %d", tc.auth, w.Code)
+		}
+		waitScrape(t, c)
+	}
+}
 func TestMetricsAdmissionCancellationAndSnapshot(t *testing.T) {
 	t.Parallel()
 

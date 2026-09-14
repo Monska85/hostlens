@@ -39,6 +39,20 @@
       "mode": "standard"
     },
     {
+      "target": "systemd-restricted-arm64",
+      "kind": "systemd",
+      "image": "hostlens-systemd-probe:local",
+      "arch": "arm64",
+      "mode": "restricted"
+    },
+    {
+      "target": "systemd-standard-arm64",
+      "kind": "systemd",
+      "image": "hostlens-systemd-probe:local",
+      "arch": "arm64",
+      "mode": "standard"
+    },
+    {
       "target": "audit-postgres",
       "kind": "platform",
       "image": "postgres:17-bookworm",

@@ -189,13 +189,20 @@ func (f *Flight) Run(ctx context.Context, work func() Reply) (Reply, error) {
 	}
 }
 
-type limitedBuffer struct{ bytes.Buffer }
+// limitedBuffer is a plain io.Writer on purpose: embedding bytes.Buffer
+// would expose ReadFrom, which lets io.Copy-style writers bypass MaxBytes.
+type limitedBuffer struct {
+	buf      []byte
+	exceeded bool
+}
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > MaxBytes {
+	if len(b.buf)+len(p) > MaxBytes {
+		b.exceeded = true
 		return 0, errors.New("telemetry size limit")
 	}
-	return b.Buffer.Write(p)
+	b.buf = append(b.buf, p...)
+	return len(p), nil
 }
 func Encode(families []*dto.MetricFamily) ([]byte, error) {
 	b := &limitedBuffer{}
@@ -204,12 +211,12 @@ func Encode(families []*dto.MetricFamily) ([]byte, error) {
 			return nil, err
 		}
 	}
-	return b.Bytes(), nil
+	return b.buf, nil
 }
 func Wire(families []*dto.MetricFamily) ([]byte, error) {
 	b := &limitedBuffer{}
 	err := json.NewEncoder(b).Encode(families)
-	return b.Bytes(), err
+	return b.buf, err
 }
 func BackendUp(up bool) *dto.MetricFamily {
 	value := 0.

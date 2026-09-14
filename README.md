@@ -17,7 +17,7 @@ The gateway and diagnostic backend run as separate processes and identities. The
 
 ## Start here
 
-Read the [installation guide](docs/v1/INSTALL.md) to install and configure a host, [operator instructions](docs/v1/OPERATIONS.md) for day-two reference, and [validation evidence](docs/v1/VALIDATION.md) for tested behavior and remaining limits. The MCP endpoint defaults to `http://127.0.0.1:8080/mcp`; bearer authentication remains required on loopback.
+Download release archives from the [GitHub Releases page](https://github.com/Monska85/hostlens/releases). Read the [installation guide](docs/v1/INSTALL.md) to install and configure a host, [operator instructions](docs/v1/OPERATIONS.md) for day-two reference, and [validation evidence](docs/v1/VALIDATION.md) for tested behavior and remaining limits. The MCP endpoint defaults to `http://127.0.0.1:8080/mcp`; bearer authentication remains required on loopback.
 
 Choose diagnostic privilege deliberately:
 

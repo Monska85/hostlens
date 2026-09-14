@@ -119,6 +119,45 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue((self.root / "upstream/LICENSE").is_file())
         self.assertEqual((prepare.OUT / "unrelated").read_text(), "keep")
 
+    def test_shipped_docs_carry_the_candidate_version(self):
+        (self.root / "docs/v1/OPERATIONS.md").write_text(
+            "tar -xzf hostlens-0.1.0-dev-linux-amd64.tar.gz\n"
+            "After the v0.1.0 release, history stays historical.\n"
+            "Tool labels are the fixed [diagnostic tool names](SPEC.md#tool-contract).\n"
+        )
+        (self.root / "docs/v1/INSTALL.md").write_text(
+            "tar -xzf hostlens-0.1.0-linux-amd64.tar.gz -C /opt/hostlens-release\n"
+        )
+        (self.root / "docs/v1/VALIDATION.md").write_text(
+            "The [audit records](../../openspec/changes) retain findings.\n"
+            "The [delivery review](../../openspec/changes/archive/2026-09-11-simplify-delivery-toolchain/review.md) records scope.\n"
+            "Use the [coverage command](../RELEASING.md#coverage).\n"
+        )
+        prepare.prepare("2.3.4")
+        for arch in prepare.ARCHITECTURES:
+            stage = prepare.OUT / ("linux-" + arch)
+            for name in ("OPERATIONS.md", "INSTALL.md"):
+                shipped = (stage / name).read_text()
+                self.assertIn("hostlens-2.3.4-linux-amd64.tar.gz", shipped)
+                self.assertNotIn("hostlens-0.1.0", shipped)
+            self.assertIn(
+                "After the v0.1.0 release",
+                (stage / "OPERATIONS.md").read_text(),
+                "historical version facts must not be templated",
+            )
+            shipped = (stage / "VALIDATION.md").read_text()
+            for link in (
+                "https://github.com/Monska85/hostlens/tree/v2.3.4/openspec/changes)",
+                "https://github.com/Monska85/hostlens/blob/v2.3.4/openspec/changes/archive/2026-09-11-simplify-delivery-toolchain/review.md)",
+                "https://github.com/Monska85/hostlens/blob/v2.3.4/docs/RELEASING.md#coverage)",
+            ):
+                self.assertIn(link, shipped)
+            self.assertIn(
+                "https://github.com/Monska85/hostlens/blob/v2.3.4/docs/v1/SPEC.md#tool-contract",
+                (stage / "OPERATIONS.md").read_text(),
+            )
+            self.assertNotIn("../../openspec", shipped)
+
     def test_invalid_dependencies_fail_before_manifest(self):
         for record in ("malformed", "module v1.0.0 relative", "module invalid /tmp"):
             with self.subTest(record=record), self.assertRaisesRegex(ValueError, "Malformed"):
@@ -145,17 +184,36 @@ class ChecksumTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             work = pathlib.Path(directory)
+            archives = work / "dist" / "archives"
+            archives.mkdir(parents=True)
             names = [f"hostlens-1.2.3-linux-{arch}.tar.gz" for arch in ("amd64", "arm64")]
             for name in names:
-                (work / name).write_bytes(b"candidate")
-            valid = subprocess.check_output(["sha256sum", *names], cwd=work, text=True)
+                (archives / name).write_bytes(b"candidate")
+            valid = subprocess.check_output(["sha256sum", *names], cwd=archives, text=True)
             gh = work / "gh"
-            gh.write_text("#!/bin/sh\ntouch uploaded\n")
+            gh.write_text(
+                "#!/bin/sh\n"
+                "# A release never exists on first view; create succeeds and marks it.\n"
+                'if [ "${1}" = release ] && [ "${2}" = view ]; then\n'
+                "  exit 1\n"
+                "fi\n"
+                'if [ "${1}" = release ] && [ "${2}" = create ]; then\n'
+                "  touch uploaded\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 1\n"
+            )
             gh.chmod(0o755)
+            # Publish extracts release notes from the changelog section for
+            # the version; provide one so the checksum checks stay the focus.
+            (work / "CHANGELOG.md").write_text(
+                "## 1.2.3 - 2026-01-01\n\n### Added\n\n- Fixture release notes.\n"
+            )
             env = dict(
                 os.environ,
                 HOSTLENS_VERSION="1.2.3",
                 RELEASE_TAG="v1.2.3",
+                GITHUB_WORKSPACE=work,
                 PATH=directory + ":" + os.environ["PATH"],
             )
             for content in (
@@ -163,18 +221,18 @@ class ChecksumTests(unittest.TestCase):
                 valid.splitlines()[0] + "\n",
                 valid + "0" * 64 + "  " + names[0] + "\n",
             ):
-                (work / "checksums.txt").write_text(content)
-                for command in (archive_check, publish):
-                    (work / "uploaded").unlink(missing_ok=True)
+                (archives / "checksums.txt").write_text(content)
+                for command, cwd in ((archive_check, archives), (publish, work)):
+                    (archives / "uploaded").unlink(missing_ok=True)
                     result = subprocess.run(
                         ["bash", "-eo", "pipefail", "-c", command],
-                        cwd=work,
+                        cwd=cwd,
                         env=env,
                         capture_output=True,
                     )
                     self.assertEqual(result.returncode == 0, content == valid)
                     if content != valid:
-                        self.assertFalse((work / "uploaded").exists())
+                        self.assertFalse((archives / "uploaded").exists())
 
 
 if __name__ == "__main__":

@@ -177,6 +177,51 @@ func TestEffectGateRejectsBeforeBackendAccess(t *testing.T) {
 	}
 }
 
+func TestBackendLossFallbackAdmitsOnlyKnownTools(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultsLinux(false)
+	cfg.TokenStore = filepath.Join(t.TempDir(), "tokens.json")
+	p, err := policy.CompileLinux(cfg, "/config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := backend.NewSnapshot(cfg, p)
+	be := backend.New(snap, func() (backend.Snapshot, error) { return snap, nil }, func(backend.Snapshot) contract.Collector { return observedCollector{} }, "be")
+	bs := httptest.NewServer(be.Handler())
+	client := bs.Client()
+	client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r.URL.Scheme = "http"
+		r.URL.Host = strings.TrimPrefix(bs.URL, "http://")
+		return http.DefaultTransport.RoundTrip(r)
+	})
+	c := &Coordinator{Active: snap, Tokens: token.Store{Path: cfg.TokenStore}, HTTP: client, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	store := token.Store{Path: cfg.TokenStore, AdminUID: os.Geteuid()}
+	_, secret, e := store.Create("test", []string{"health"}, time.Now().Add(time.Hour))
+	if e != nil {
+		t.Fatal(e)
+	}
+	request := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "http://localhost/mcp", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		r.Header.Set("MCP-Protocol-Version", "2025-06-18")
+		r.Header.Set("Authorization", "Bearer "+secret)
+		w := httptest.NewRecorder()
+		c.Handler().ServeHTTP(w, r)
+		return w
+	}
+	bs.Close()
+	if w := request(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_os_info","arguments":{}}}`); !strings.Contains(w.Body.String(), "backend_unavailable") {
+		t.Fatal("admitted tool did not report backend failure", w.Body.String())
+	}
+	// An unknown tool must not receive the backend-failure envelope: fallback
+	// admission reuses the fail-closed per-call predicate.
+	if w := request(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"unclassified_tool","arguments":{}}}`); strings.Contains(w.Body.String(), "backend_unavailable") {
+		t.Fatal("unknown tool received the backend-failure envelope", w.Body.String())
+	}
+}
+
 type admissionProbe struct {
 	values      []bool
 	commits     int

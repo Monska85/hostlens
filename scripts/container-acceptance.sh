@@ -9,8 +9,12 @@ if [ "${1:-test}" = archives ]; then
   sha256sum "hostlens-${HOSTLENS_VERSION}-linux-amd64.tar.gz" "hostlens-${HOSTLENS_VERSION}-linux-arm64.tar.gz" | sort >/tmp/hostlens-expected-checksums
   sort checksums.txt | diff /tmp/hostlens-expected-checksums -
   for arch in amd64 arm64; do
-    /tmp/archive -archive "hostlens-${HOSTLENS_VERSION}-linux-${arch}.tar.gz" -arch "${arch}" -version "${HOSTLENS_VERSION}"
+    /tmp/archive -archive "hostlens-${HOSTLENS_VERSION}-linux-${arch}.tar.gz" -dest "/tmp/extracted-${arch}" -arch "${arch}" -version "${HOSTLENS_VERSION}"
   done
+  # Every shipped markdown link resolves inside the archive or points at the
+  # repository GitHub URL; repo-only relative targets are rewritten at build
+  # time by tools/release/prepare.py.
+  python3 -B /source/tools/release/check_doc_links.py /tmp/extracted-amd64 /tmp/extracted-arm64
   exit 0
 fi
 mkdir /tmp/work

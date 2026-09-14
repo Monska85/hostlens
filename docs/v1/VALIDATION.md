@@ -12,7 +12,7 @@ The audit exercised these checks successfully:
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Runtime                     | Disposable-container Go race suite, vet, Linux amd64/arm64 builds, and focused boundary/failure regressions                                  |
 | Packaging and tooling       | Six release tests, eight matrix tests, and one developer-command test in disposable containers                                               |
-| Compatibility and lifecycle | Debian, Ubuntu, Arch amd64, emulated Debian arm64, and native systemd restricted/standard acceptance                                         |
+| Compatibility and lifecycle | Debian, Ubuntu, Arch amd64, emulated Debian arm64, and native amd64/arm64 systemd restricted/standard acceptance                             |
 | Security regression         | Masked hard-link denial, token parsing/limits, overload/deadlines, configuration ceilings, and upgrade rollback                              |
 | Static validation           | Go/Python/shell/document formatting, Ruff, ShellCheck, actionlint, strict current/archived OpenSpec validation, and GoReleaser configuration |
 | Dependencies                | Fresh runtime `govulncheck`: no vulnerabilities found at scan time                                                                           |
@@ -78,7 +78,7 @@ Use the [CI workflow](https://github.com/Monska85/hostlens/actions/workflows/ci.
 
 ## Limits
 
-- **Native coverage:** Container acceptance shares the Linux host kernel. Emulated arm64 smoke does not prove native arm64 systemd behavior; macOS and Windows runtime support is unimplemented.
+- **Native coverage:** Container acceptance shares the Linux host kernel. Native arm64 systemd acceptance runs in hosted CI on `ubuntu-24.04-arm` runners; local emulated arm64 smoke remains separate evidence and does not prove native systemd behavior on its own. macOS and Windows runtime support is unimplemented.
 - **Blocked I/O:** Kernel-stalled filesystem work can retain bounded backend slots after client timeout. Context cancellation cannot forcibly repair uninterruptible kernel I/O.
 - **Load:** Focused benchmarks and concurrency regressions do not establish sustained production capacity across large hosts, slow disks, or unreliable remote mounts.
 - **Privilege:** Standard mode has broad read capability. Secret masks and diagnostic policy protect documented paths, not every secret copy or every consequence of a compromised backend.
@@ -104,12 +104,15 @@ Real systemd cases verified protected and anonymous scrapes, reload transitions,
 
 After the v0.1.0 release, verified dead code was deleted from the observation contract (`ValidName`, `ImageSummary.UniqueSize`, `ContainerSummary.References`/`ResourceRefs`, `Response.Negotiated`, `EngineInfo.Rootless`/`DockerDesktop`, `ContainerSummary` size fields, and `Request.Offset`/`Limit`); the backend and observer ship version-coherent, so the field removals are safe within one artifact set. The pass raised internal statement coverage in the disposable checks container from 77.5% to 85.8%, with tests for the observer transport (success, HTTP refusal, dead socket, malformed body, cancellation), the socket-activated listener (including child-process coverage merging through `-test.gocoverdir`), archive extraction, lifecycle commands and readiness, CLI flag and plan paths, gateway envelopes and measured flushes, and the CPU health sample.
 
-The pass also fixed a real defect the new tests exposed: `limitedBuffer` embedded `bytes.Buffer`, whose promoted `ReadFrom` let `exec`'s `io.Copy` bypass the inspection limit entirely, so oversized command output was captured unbounded. The buffer is now a plain `io.Writer` and the ceiling is enforced and tested.
+The pass also fixed a real defect the new tests exposed: `limitedBuffer` embedded `bytes.Buffer`, whose promoted `ReadFrom` let `exec`'s `io.Copy` bypass the inspection limit entirely, so oversized command output was captured unbounded. The buffer is now a plain `io.Writer` and the ceiling is enforced and tested. The telemetry exposition buffer (`internal/telemetry`) had the same promoted-`ReadFrom` defect class; it is now the same plain bounded-writer shape, with a regression test proving `io.Copy` cannot bypass the telemetry ceiling.
 
-Functions intentionally below 50% or uncovered, with reasons:
+Current statement coverage is 85.9% of internal statements in the disposable checks container (fresh `make coverage` run; 85.8% at the dead-code pass, since raised by the bounded-writer and admission-gate regression tests). Functions intentionally below 50%, with reasons:
+
+- `secretIsMasked` (35.7%, `internal/platform/linux/isolation_linux.go`) guards after the reference check (reference `SameFile` mismatch, non-empty file size, unclean path, success for file and directory masks): they need a real systemd inaccessible mount under `/run/systemd/inaccessible`; tests refuse to create one. Reachable guards (no matching mount, prefix match, missing `ro`, unstatable path, non-root uid, non-zero permissions) are covered.
+
+Everything else at or above 50%, including the following areas whose partial percentages are raised by the subprocess counter merge (`-test.gocoverdir`):
 
 - Observer and CLI `Main` serve/signal loops: process lifetime, covered by native acceptance instead.
 - `ListenInherited` and observer `Main` listener setup beyond refusal branches: socket activation success requires a real service manager handoff; the subprocess helper covers the path and merges its counters.
-- `secretIsMasked` guards after the reference check (reference `SameFile` mismatch, non-empty file size, unclean path, success for file and directory masks): they need a real systemd inaccessible mount under `/run/systemd/inaccessible`; tests refuse to create one. Reachable guards (no matching mount, prefix match, missing `ro`, unstatable path, non-root uid, non-zero permissions) are covered.
-- `docker_live_test.go` stays environment-gated and is excluded from coverage by design.
 - `PeerUID`/`resolveUID`/`resolveGID` syscall-error and corrupted-system-file branches: unreachable without corrupting live system files.
+- `docker_live_test.go` compiles inside the coverage run and skips outside a live-Docker environment; its cases do not contribute counters by design, and the file is environment-gated rather than excluded from the build.

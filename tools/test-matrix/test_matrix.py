@@ -32,7 +32,15 @@ class MatrixTests(unittest.TestCase):
             self.assertEqual(
                 runner.select_cases(self.cases, "native", None, arch)[0]["target"], "debian-" + arch
             )
-        self.assertEqual(len(runner.select_cases(self.cases, "", "systemd", None)), 2)
+        self.assertEqual(len(runner.select_cases(self.cases, "", "systemd", None)), 4)
+        for target, arch in (
+            ("systemd-restricted-arm64", "arm64"),
+            ("systemd-standard-arm64", "arm64"),
+        ):
+            case = runner.select_cases(self.cases, target, None, "arm64")[0]
+            self.assertEqual(case["kind"], "systemd")
+            self.assertEqual(case["arch"], arch)
+            self.assertEqual(case["mode"], target.removeprefix("systemd-").removesuffix("-arm64"))
         for target, kind in (("missing", None), ("debian-amd64", "systemd"), ("native", None)):
             with self.subTest(target=target, kind=kind), self.assertRaises(ValueError):
                 runner.select_cases(self.cases, target, kind, "unknown")

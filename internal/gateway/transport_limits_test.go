@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,47 @@ import (
 	"github.com/Monska85/hostlens/internal/config"
 	"github.com/Monska85/hostlens/internal/token"
 )
+
+func TestBearerSchemeSpellingIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultsLinux(false)
+	c := Coordinator{Active: backend.Snapshot{Config: cfg}, Log: slog.New(slog.NewJSONHandler(io.Discard, nil)), Tokens: verifyFunc(func(secret string) (token.Record, error) {
+		if secret != "test" {
+			return token.Record{}, errors.New("invalid credential")
+		}
+		return token.Record{ID: "test", Roles: []string{"health"}}, nil
+	}), HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"capabilities":{}}`)), Header: make(http.Header)}, nil
+	})}}
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`
+	for _, spelling := range []string{"Bearer", "bearer", "BEARER"} {
+		req := httptest.NewRequest("POST", "http://example.com/mcp", strings.NewReader(body))
+		req.Header.Set("Authorization", spelling+" test")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+		response := httptest.NewRecorder()
+		c.Handler().ServeHTTP(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s scheme rejected: %d %s", spelling, response.Code, response.Body.String())
+		}
+	}
+	for _, tc := range []struct{ auth string }{{""}, {"Basic test"}, {"Bearer"}, {"Bearer  test"}, {"Bearer wrong"}} {
+		req := httptest.NewRequest("POST", "http://example.com/mcp", strings.NewReader(body))
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+		response := httptest.NewRecorder()
+		c.Handler().ServeHTTP(response, req)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("malformed credential accepted: %q %d", tc.auth, response.Code)
+		}
+	}
+}
 
 func TestOriginAndRequestBodyLimits(t *testing.T) {
 	t.Parallel()

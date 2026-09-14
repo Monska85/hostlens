@@ -308,8 +308,10 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 	r.Data["process"] = first
 }
 
-// Read the link itself, never its target. Executable paths require target policy
-// approval; descriptor observations expose only socket inode numbers to callers.
+// Read the link itself, never its target. Executable target paths are
+// default-allowed unless denied by policy; only the path string is exposed,
+// never link contents. Descriptor observations expose only socket inode
+// numbers to callers.
 func (c *Collector) auditLink(dir *os.File, name, path string, executable bool) (string, error) {
 	if !c.Policy.Allowed("files", path, true) || !c.Policy.Allowed("files", filepath.Join(dir.Name(), name), true) {
 		return "", errors.New("source denied")

@@ -22,7 +22,26 @@ type Store struct {
 	AdminUID int
 }
 
+// verifyDirTrusted applies the directory-level precondition shared by reads
+// and administrative changes: a real directory, owned by root or the effective
+// user, without group or other write access. A directory an attacker can write
+// to lets a crafted store be swapped in, so both paths fail closed on it.
+func (s Store) verifyDirTrusted() error {
+	dir := filepath.Dir(s.Path)
+	st, e := os.Lstat(dir)
+	if e != nil || !st.IsDir() || st.Mode().Perm()&0022 != 0 {
+		return errors.New("protected token directory required")
+	}
+	if stat, ok := st.Sys().(*syscall.Stat_t); ok && stat.Uid != 0 && int(stat.Uid) != os.Geteuid() {
+		return errors.New("protected token directory required")
+	}
+	return nil
+}
+
 func (s Store) read() ([]Record, error) {
+	if e := s.verifyDirTrusted(); e != nil {
+		return nil, e
+	}
 	f, e := os.OpenFile(s.Path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if errors.Is(e, os.ErrNotExist) {
 		return []Record{}, nil
@@ -71,10 +90,8 @@ func (s Store) change(fn func(*[]Record) error) error {
 	if os.Geteuid() != s.AdminUID {
 		return errors.New("local administrator identity required")
 	}
-	dir := filepath.Dir(s.Path)
-	st, e := os.Lstat(dir)
-	if e != nil || !st.IsDir() || st.Mode().Perm()&0022 != 0 {
-		return errors.New("protected token directory required")
+	if e := s.verifyDirTrusted(); e != nil {
+		return e
 	}
 	lock, e := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
 	if e != nil {

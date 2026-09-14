@@ -75,6 +75,10 @@ func RestartFingerprint(s backend.Snapshot) (string, error) {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:]), nil
 }
+
+// maxBackendResponseBytes bounds any diagnostic IPC response the gateway decodes.
+const maxBackendResponseBytes = 16 << 20
+
 func (c *Coordinator) rpc(ctx context.Context, path string, in, out any) error {
 	b, e := json.Marshal(in)
 	if e != nil {
@@ -95,7 +99,7 @@ func (c *Coordinator) rpc(ctx context.Context, path string, in, out any) error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("backend rejected %s (%d)", path, resp.StatusCode)
 	}
-	err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out)
+	err := json.NewDecoder(io.LimitReader(resp.Body, maxBackendResponseBytes)).Decode(out)
 	if err != nil && ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
@@ -292,9 +296,18 @@ func (c *Coordinator) MCP(ctx context.Context, identity token.Record) *mcp.Serve
 		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 				if method == "tools/call" {
-					if params, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && token.Allows(identity.Roles, params.Name) {
-						b, _ := json.Marshal(failure)
-						return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}, StructuredContent: failure}, nil
+					if params, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok {
+						definition, known := contract.Tool(params.Name)
+						c.mu.RLock()
+						readOnly := c.Active.Config.MCP.ReadOnly
+						c.mu.RUnlock()
+						// Fallback admission uses the same fail-closed predicate
+						// as per-call admission, so a hypothetical non-diagnostic
+						// or unknown tool can never receive a result here.
+						if toolAdmitted(definition, known, readOnly) && token.Allows(identity.Roles, params.Name) {
+							b, _ := json.Marshal(failure)
+							return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}, StructuredContent: failure}, nil
+						}
 					}
 				}
 				return next(ctx, method, req)

@@ -1,6 +1,6 @@
 # Operating HostLens
 
-HostLens is a local implementation candidate for Linux amd64 and arm64. It exposes diagnostic tools through bearer-authenticated Streamable HTTP at `/mcp` and service telemetry at `/metrics`. It does not execute remediation, schedule monitoring, retain inspected content, or call model providers. See [validation evidence](VALIDATION.md) before deployment; no release has been published.
+HostLens is a local implementation candidate for Linux amd64 and arm64. It exposes diagnostic tools through bearer-authenticated Streamable HTTP at `/mcp` and service telemetry at `/metrics`. It does not execute remediation, schedule monitoring, retain inspected content, or call model providers. See [validation evidence](VALIDATION.md) before deployment. Release archives are prepared and validated as drafts by the release workflow and stay unpublished while the repository is private; verification procedures live in the repository's `docs/RELEASING.md`, and `SECURITY.md` records the support policy.
 
 ## Prerequisites
 
@@ -197,7 +197,7 @@ No proxies are trusted by default. `trusted_proxies` accepts IPs/CIDRs; only a t
 
 If changing token or TLS-key locations, update the diagnostic unit's `InaccessiblePaths` for those configured sources before restarting. Standard mode refuses startup unless a verified systemd inaccessible mount hides each configured secret. Mount verification handles masked ancestors and checks the inaccessible object identity. Restart TLS to activate replacement certificate or key contents. After correcting repeated startup failures, run `systemctl reset-failed hostlens-gateway.service` before starting it again if systemd reports that start requests repeated too quickly.
 
-The diagnostic unit sets `RestrictSUIDSGID=no` because systemd otherwise disables required `openat2`; the gateway keeps that control. The reader retains `NoNewPrivileges`, read-only filesystem protection, fixed capabilities, protected credential mounts, namespace/device/network restrictions, and syscall filtering. Profiles and read-only mounts do not provide complete protection against a compromised backend.
+The diagnostic unit sets `RestrictSUIDSGID=no` because systemd otherwise disables required `openat2`; the gateway keeps that control. Every service unit applies the same sandbox baseline: a `@system-service openat2` syscall allow-list with mount, reboot, swap, and raw-I/O denials, native architecture pinning, personality, realtime, and namespace locks, and protected clock, hostname, and kernel logs plus a private IPC namespace. The gateway and observer additionally hide other users' processes and non-PID proc files (`ProtectProc=invisible`, `ProcSubset=pid`); the diagnostic reader omits them because audit evidence reads system-wide proc files. The reader retains `NoNewPrivileges`, read-only filesystem protection, fixed capabilities, protected credential mounts, namespace/device/network restrictions, and syscall filtering. Profiles and read-only mounts do not provide complete protection against a compromised backend.
 
 In restricted mode, administrators may grant targeted ACLs or reader-group access. For journal access, membership in `systemd-journal` gives the process broader journal visibility than individual HostLens unit rules expose. Such manual grants are administrator-owned; account for file replacement during log rotation and document cleanup separately.
 
@@ -254,7 +254,7 @@ hostlens reconcile --system --apply
 systemctl restart hostlens-diagnostics.service hostlens-gateway.service
 ```
 
-Reconciliation creates a dedicated non-login identity (`hostlens-observer`), adopts the observer binary placed by installation, writes the observer service and socket units, and enables the socket unit. Upgrading from a release that predates the observer needs `--source` with the extracted release (see below). Docker group authority is process-scoped: the service declares `SupplementaryGroups=` for the configured socket group and no persistent account membership is ever added. The service declares `Requisite=docker.service`, `After=docker.service`, and `PartOf=docker.service`, so a diagnostic request can activate the observer only while Docker is active, and no HostLens action starts, stops, restarts, or reconfigures Docker.
+Reconciliation creates a dedicated non-login identity (`hostlens-observer`), adopts the observer binary placed by installation, writes the observer service and socket units, and enables the socket unit. Upgrading from a release that predates the observer needs `--source` with the extracted release (see below). `install`, `upgrade`, `uninstall`, and `reconcile` each enforce a two-minute plan-and-mutate deadline; long-running mutations abort with an error and the plan records completed steps for a safe retry. Docker group authority is process-scoped: the service declares `SupplementaryGroups=` for the configured socket group and no persistent account membership is ever added. The service declares `Requisite=docker.service`, `After=docker.service`, and `PartOf=docker.service`, so a diagnostic request can activate the observer only while Docker is active, and no HostLens action starts, stops, restarts, or reconfigures Docker.
 
 Runtime states are honest and separate:
 
@@ -282,19 +282,21 @@ deny:
 
 ### Tool contracts and exclusions
 
-| Tool                         | Evidence                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- |
-| `get_docker_info`            | Engine version, negotiated API scope, storage/cgroup/log drivers, counts, capability state        |
-| `list_docker_containers`     | Bounded live inventory: identity, lifecycle, health, ports, mounts, references                     |
-| `get_docker_container`       | One permitted container: state, restart count, limits, mounts, log driver, no health output       |
-| `get_docker_container_stats` | One point-in-time sample with daemon-supplied counters and their exact scope                       |
-| `list_docker_images`         | Deduplicated identities, tags, digests, shared-layer sizes, current container references           |
-| `list_docker_volumes`        | Names, drivers, current references, sizes only when the daemon supplies them                       |
-| `list_docker_networks`       | Identity, driver, scope, selected non-secret configuration, current references                     |
-| `get_docker_disk_usage`      | Daemon disk totals, per-resource sizes, advisory reclaimable estimates from the unused analysis    |
-| `query_docker_logs`          | Bounded stdout/stderr records with explicit truncation, rotation scope, and driver gaps            |
+| Tool                         | Evidence                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------- |
+| `get_docker_info`            | Engine version, negotiated API scope, storage/cgroup/log drivers, counts, capability state      |
+| `list_docker_containers`     | Bounded live inventory: identity, lifecycle, health, ports, mounts, references                  |
+| `get_docker_container`       | One permitted container: state, restart count, limits, mounts, log driver, no health output     |
+| `get_docker_container_stats` | One point-in-time sample with daemon-supplied counters and their exact scope                    |
+| `list_docker_images`         | Deduplicated identities, tags, digests, shared-layer sizes, current container references        |
+| `list_docker_volumes`        | Names, drivers, current references, sizes only when the daemon supplies them                    |
+| `list_docker_networks`       | Identity, driver, scope, selected non-secret configuration, current references                  |
+| `get_docker_disk_usage`      | Daemon disk totals, per-resource sizes, advisory reclaimable estimates from the unused analysis |
+| `query_docker_logs`          | Bounded stdout/stderr records with explicit truncation, rotation scope, and driver gaps         |
 
 Lists accept `offset` and `limit`, sort by full stable identity, and state that the next page is a new observation. Container tools require one `container` selector; name selectors resolve to the full immutable identity, policy is evaluated against both forms, and the resolved identity is re-verified before evidence is returned, so name reuse releases nothing for an unauthorized replacement.
+
+Docker issue `reason` strings and messages may contain Docker daemon-supplied error text; treat them as untrusted data for downstream consumers and never as HostLens vouching.
 
 Never exposed: environment values, commands and arguments, unrestricted labels, registry authentication, secrets, configs, plugin data, proxy values, raw health-check output, raw inspect objects, mounted content, or any Docker mutation (exec, attach, copy, events, build, prune, pull, push, tag, lifecycle control). A generic Docker request tool does not exist; every request is fixed in the observer.
 

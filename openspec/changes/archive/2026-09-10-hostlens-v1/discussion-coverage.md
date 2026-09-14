@@ -135,7 +135,7 @@ The discussion explored alternatives before selecting the architecture. Keeping 
 
 The conversation did not select a GitHub owner or visibility, license, final Go module path, exact dependency versions, or release-signing mechanism. Numeric health thresholds, CPU sampling duration, transport limits beyond the discussed defaults, and supported file-log parsers remain implementation details to document and validate.
 
-These are also recorded in [design open questions](design.md#open-questions) and corresponding [tasks](tasks.md). No default or implementation evidence is invented to make the specification appear finished.
+These are also recorded in [design retained future direction](design.md#retained-future-direction) and corresponding [tasks](tasks.md). No default or implementation evidence is invented to make the specification appear finished.
 
 ## Stress checks
 

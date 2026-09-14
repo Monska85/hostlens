@@ -16,7 +16,7 @@ Two system identities, `hostlens-gateway` and `hostlens-diagnostics`, are create
 
 - Linux amd64 or arm64 with systemd and a kernel that provides `openat2` (5.6 or newer).
 - Root access on the target host.
-- A release archive `hostlens-<version>-linux-<arch>.tar.gz` with its `checksums.txt`, obtained through a trusted channel. The checksum manifest verifies integrity only; verify publisher signatures through your distribution channel.
+- A release archive `hostlens-<version>-linux-<arch>.tar.gz` with its `checksums.txt`, downloaded from the [GitHub Releases page](https://github.com/Monska85/hostlens/releases). The checksum manifest verifies integrity only; verify the build's origin with the release provenance attestations (`gh attestation verify`, see below) and any publisher signatures offered through your distribution channel.
 - Rootful Docker Engine installed and running, only if you plan to enable Docker diagnostics. Rootless Docker, remote engines, Docker Desktop, Swarm administration, Podman, and Kubernetes remain unsupported. Verify the daemon socket:
 
 ```sh
@@ -37,7 +37,13 @@ tar -xzf hostlens-0.1.0-linux-amd64.tar.gz -C /opt/hostlens-release
 ls /opt/hostlens-release
 ```
 
-The extracted set contains `hostlens`, `hostlens-diagnostics`, `hostlens-docker-observer`, `config.example.yaml`, `nginx.yaml` and `allow-all.yaml` and `docker-readonly.yaml` under `profiles/`, `OPERATIONS.md`, `INSTALL.md`, `VALIDATION.md`, `LICENSE`, `NOTICE.txt`, and `licenses/`.
+The extracted set contains the `hostlens`, `hostlens-diagnostics`, and `hostlens-docker-observer` executables, `release.json` (the per-member upgrade manifest), `config.example.yaml`, `nginx.yaml`, `allow-all.yaml`, and `docker-readonly.yaml` under `profiles/`, `OPERATIONS.md`, `INSTALL.md`, `VALIDATION.md`, `LICENSE`, `NOTICE.txt`, and the upstream `licenses/` directory.
+
+Every release asset also carries a GitHub build provenance attestation recorded by the release workflow once the repository is public; while it is private, the workflow reports attestations as explicitly unavailable and delivery remains checksum-verified. From a repository checkout you can verify that the exact archive bytes were built by this repository's workflow:
+
+```sh
+gh attestation verify hostlens-<version>-linux-<arch>.tar.gz -R Monska85/hostlens
+```
 
 ## Plan and install
 
@@ -159,7 +165,12 @@ hostlens reload --system
 Then confirm availability through MCP with a diagnostics token:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_docker_info","arguments":{}}}
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": { "name": "get_docker_info", "arguments": {} }
+}
 ```
 
 A result with `"available": true` and the negotiated Engine API confirms the integration. Docker tools absent from discovery mean the observer is unreachable, Docker is stopped, or no `docker` grant is active. Direct calls to unavailable Docker tools fail closed with explicit issue codes before the observer is contacted.
@@ -171,7 +182,7 @@ A result with `"available": true` and the negotiated Engine API confirms the int
 ## Upgrade
 
 ```sh
-hostlens upgrade --archive hostlens-0.2.0-linux-amd64.tar.gz --apply
+hostlens upgrade --archive hostlens-0.1.0-linux-amd64.tar.gz --apply
 ```
 
 The upgrade verifies every archive member, retains the previous executables, preserves configuration, tokens, and active profiles, and restarts only previously active services. Changed bundled profiles are saved as `.candidate` files for review. Upgrading from a release that predates the Docker observer does not install the new binary (the running release performs the upgrade). After enabling the section, restore the binary from the extracted release once:

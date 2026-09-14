@@ -177,12 +177,15 @@ func (c *Coordinator) Handler() http.Handler {
 		peer, _, _ := net.SplitHostPort(r.RemoteAddr)
 		client := ClientIP(peer, r.Header.Get(cfg.Server.ClientIPHeader), cfg.Server.TrustedProxies)
 		auth := r.Header.Values("Authorization")
-		if len(auth) != 1 || !strings.HasPrefix(auth[0], "Bearer ") {
+		scheme, secret, hasBearer := "", "", false
+		if len(auth) == 1 {
+			scheme, secret, hasBearer = strings.Cut(auth[0], " ")
+		}
+		if !hasBearer || !strings.EqualFold(scheme, "bearer") {
 			c.Log.Error("authentication_failed", "peer_ip", peer, "client_ip", client)
 			http.Error(w, "authentication required", 401)
 			return
 		}
-		secret := strings.TrimPrefix(auth[0], "Bearer ")
 		identity, e := c.Tokens.Verify(secret)
 		if e != nil {
 			c.Log.Error("authentication_failed", "peer_ip", peer, "client_ip", client)

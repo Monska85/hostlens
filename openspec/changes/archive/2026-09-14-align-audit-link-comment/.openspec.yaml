@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: No behavior change; comment-only alignment recorded for traceability.
+skip_specs: true

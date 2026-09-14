@@ -120,14 +120,21 @@ func TestEngineSocketValidationRefusals(t *testing.T) {
 			}
 		}
 	}
-	// World-writable sockets must be refused where ownership is verifiable.
+	// World-accessible sockets must be refused: world-readable sockets are
+	// root-equivalent on the host.
 	if e := os.Chmod(sock, 0666); e != nil {
 		t.Fatal(e)
 	}
 	if e := validateEngineSocket(sock, os.Getgid()); e == nil {
 		t.Fatal("unsafe socket accepted")
-	} else if os.Getuid() == 0 && !strings.Contains(e.Error(), "world-writable") {
-		t.Fatalf("world-writable socket accepted: %v", e)
+	} else if os.Getuid() == 0 && !strings.Contains(e.Error(), "world access") {
+		t.Fatalf("world-accessible socket accepted: %v", e)
+	}
+	if e := os.Chmod(sock, 0644); e != nil {
+		t.Fatal(e)
+	}
+	if e := validateEngineSocket(sock, os.Getgid()); e == nil {
+		t.Fatal("world-readable socket accepted")
 	}
 	if e := os.Chmod(sock, 0660); e != nil {
 		t.Fatal(e)

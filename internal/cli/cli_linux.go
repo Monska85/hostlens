@@ -24,6 +24,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// maxAdminResponseBytes bounds any administrative IPC response the CLI reads.
+const maxAdminResponseBytes = 65536
+
 func flags(name string) *flag.FlagSet { return flag.NewFlagSet(name, flag.ContinueOnError) }
 func Main(args []string) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
@@ -165,7 +168,7 @@ func Main(args []string) error {
 		if resp.StatusCode != 200 {
 			return fmt.Errorf("administrative operation failed: %d", resp.StatusCode)
 		}
-		_, e = io.Copy(os.Stdout, io.LimitReader(resp.Body, 65536))
+		_, e = io.Copy(os.Stdout, io.LimitReader(resp.Body, maxAdminResponseBytes))
 		return e
 	case "policy":
 		if sub != "explain" || target == "" {
@@ -228,7 +231,7 @@ func explain(s backend.Snapshot, configPath, target string, recursive bool, uid 
 		resp, e := linux.UnixClient(s.Config.AdminSocket).Post("http://unix/status", "application/json", nil)
 		if e == nil {
 			defer resp.Body.Close()
-			if resp.StatusCode == 200 && json.NewDecoder(io.LimitReader(resp.Body, 65536)).Decode(&live) == nil {
+			if resp.StatusCode == 200 && json.NewDecoder(io.LimitReader(resp.Body, maxAdminResponseBytes)).Decode(&live) == nil {
 				comparison = "DIFFERENT"
 				if live.Fingerprint == s.Fingerprint {
 					comparison = "MATCH"

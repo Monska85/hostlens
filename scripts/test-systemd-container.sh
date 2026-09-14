@@ -52,6 +52,7 @@ docker run --detach --rm --pull=never \
   "${@}" \
   --security-opt=apparmor=unconfined \
   -e SYSTEMD_LOG_TARGET=console \
+  -e "HOSTLENS_VERSION=${version}" \
   "${image}" /bin/sh -ec '
     mount -o remount,rw /sys/fs/cgroup
     exec /sbin/init

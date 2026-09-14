@@ -9,6 +9,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -219,6 +220,59 @@ func TestFlightRetainsStalledCapacity(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	flight.Release()
+}
+
+func TestLimitedBufferRefusesCopyAndOverflow(t *testing.T) {
+	t.Parallel()
+	b := &limitedBuffer{}
+	if _, ok := any(b).(io.ReaderFrom); ok {
+		t.Fatal("limitedBuffer must not expose ReadFrom")
+	}
+	n, err := io.Copy(b, strings.NewReader(strings.Repeat("x", MaxBytes+10)))
+	if err == nil || !b.exceeded || n != 0 {
+		t.Fatalf("io.Copy bypassed the ceiling: n=%d err=%v", n, err)
+	}
+	if len(b.buf) > MaxBytes {
+		t.Fatalf("ceiling exceeded: %d", len(b.buf))
+	}
+}
+
+func TestLimitedBufferEnforcesCeiling(t *testing.T) {
+	t.Parallel()
+	b := &limitedBuffer{}
+	if _, err := b.Write([]byte("0123456789")); err != nil || b.exceeded {
+		t.Fatalf("first write rejected: %v", err)
+	}
+	if _, err := b.Write(bytes.Repeat([]byte("y"), MaxBytes-10)); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.buf) != MaxBytes {
+		t.Fatalf("exact fit length: %d", len(b.buf))
+	}
+	if _, err := b.Write([]byte("z")); err == nil || !b.exceeded {
+		t.Fatal("overflow accepted")
+	}
+	if len(b.buf) != MaxBytes || string(b.buf[len(b.buf)-1]) != "y" {
+		t.Fatal("refused write mutated buffer")
+	}
+}
+
+func TestEncodeWireRefuseOverflow(t *testing.T) {
+	t.Parallel()
+	r := New("backend")
+	r.Tool("get_os_info", contract.Result{}, time.Second)
+	f, err := r.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	large := strings.Repeat("x", MaxBytes)
+	f[0].Help = &large
+	if _, err := Encode(f); err == nil {
+		t.Fatal("exposition overflow succeeded")
+	}
+	if _, err := Wire(f); err == nil {
+		t.Fatal("wire overflow succeeded")
+	}
 }
 
 func TestMaximumCatalogSeriesAndSize(t *testing.T) {

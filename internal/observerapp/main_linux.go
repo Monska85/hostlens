@@ -14,10 +14,8 @@ import (
 	"time"
 
 	"github.com/Monska85/hostlens/internal/config"
+	"github.com/Monska85/hostlens/internal/contract"
 )
-
-// Version is set by the archive builder for tagged releases.
-var Version = "0.1.0-dev"
 
 // Main runs the isolated Docker observer. The process is only useful when an
 // administrator enabled and reconciled Docker diagnostics; it refuses to
@@ -28,7 +26,7 @@ func Main(args []string) error {
 		return nil
 	}
 	if args[0] == "version" {
-		fmt.Println(Version)
+		fmt.Println(contract.Version)
 		return nil
 	}
 	if args[0] != "serve" {

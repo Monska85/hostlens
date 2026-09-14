@@ -59,11 +59,15 @@ func (c *Coordinator) scrape(w http.ResponseWriter, r *http.Request, cfg config.
 
 		if !cfg.Metrics.AllowAnonymous {
 			auth := r.Header.Values("Authorization")
-			if len(auth) != 1 || !strings.HasPrefix(auth[0], "Bearer ") {
+			scheme, secret, hasBearer := "", "", false
+			if len(auth) == 1 {
+				scheme, secret, hasBearer = strings.Cut(auth[0], " ")
+			}
+			if !hasBearer || !strings.EqualFold(scheme, "bearer") {
 				audit("authentication_failed", "")
 				return telemetry.Reply{Status: 401}
 			}
-			identity, err := c.Tokens.Verify(strings.TrimPrefix(auth[0], "Bearer "))
+			identity, err := c.Tokens.Verify(secret)
 			if err != nil {
 				audit("authentication_failed", "")
 				return telemetry.Reply{Status: 401}

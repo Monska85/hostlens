@@ -99,8 +99,8 @@ func validateEngineSocket(path string, groupGID int) error {
 	if mode&0o060 == 0 {
 		return errors.New("docker daemon socket denies group access")
 	}
-	if mode&0o007 != 0 && mode&0o002 != 0 {
-		return errors.New("docker daemon socket is world-writable; refusing unsafe permissions")
+	if mode&0o007 != 0 {
+		return errors.New("docker daemon socket grants world access; refusing unsafe permissions")
 	}
 	return nil
 }

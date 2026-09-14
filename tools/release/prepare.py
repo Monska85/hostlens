@@ -27,6 +27,33 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT = ROOT / "dist"
 ARCHITECTURES = ("amd64", "arm64")
 
+# Shipped docs keep development-state version placeholders in the repository
+# and must always name the archive version they ride in.
+DOC_VERSION_PLACEHOLDERS = (
+    (b"hostlens-0.1.0-dev-", "hostlens-{}-"),
+    (b"hostlens-0.1.0-linux-", "hostlens-{}-linux-"),
+)
+
+# Links that resolve in the repository but not inside an archive are rewritten
+# to the versioned GitHub tree; every shipped relative link must then resolve
+# within the archive.
+GITHUB_BASE = "https://github.com/Monska85/hostlens"
+REPO_ONLY_LINKS = (
+    ("](../../openspec/changes/archive/", GITHUB_BASE + "/blob/v{v}/openspec/changes/archive/"),
+    ("](../../openspec/changes)", GITHUB_BASE + "/tree/v{v}/openspec/changes)"),
+    ("](../RELEASING.md", GITHUB_BASE + "/blob/v{v}/docs/RELEASING.md"),
+    ("](SPEC.md", GITHUB_BASE + "/blob/v{v}/docs/v1/SPEC.md"),
+)
+
+
+def doc_bytes(source, value):
+    data = (ROOT / source).read_bytes()
+    for placeholder, replacement in DOC_VERSION_PLACEHOLDERS:
+        data = data.replace(placeholder, replacement.format(value).encode())
+    for repo_link, github_link in REPO_ONLY_LINKS:
+        data = data.replace(repo_link.encode(), github_link.format(v=value).encode())
+    return data
+
 
 def clean():
     for name in ("linux-" + arch for arch in ARCHITECTURES):
@@ -75,7 +102,10 @@ def prepare(value):
             ("LICENSE", "LICENSE"),
             ("NOTICE", "NOTICE.txt"),
         ):
-            shutil.copyfile(ROOT / source, target / name)
+            if name.endswith(".md"):
+                (target / name).write_bytes(doc_bytes(source, value))
+            else:
+                shutil.copyfile(ROOT / source, target / name)
         notices = target / "licenses"
         notices.mkdir()
         for module in dependencies:

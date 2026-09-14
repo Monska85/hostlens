@@ -104,6 +104,20 @@ allow:
 YAML
 chmod 0644 /etc/hostlens/profiles/acceptance.yaml
 sed -i 's/profiles: \[\]/profiles: [acceptance]/' /etc/hostlens/config.yaml
+printf '%s\n' 'HOSTLENS_STAGE: verify unit sandbox baseline'
+# Exact directive presence per unit keeps the assertion independent of
+# systemd security scoring. The diagnostics unit intentionally omits
+# ProtectProc and ProcSubset: audit evidence reads system-wide proc files.
+assert_directive() {
+  grep -q "^${2}" "/etc/systemd/system/${1}"
+}
+for directive in LockPersonality RestrictRealtime RestrictNamespaces SystemCallArchitectures=native 'SystemCallFilter=@system-service openat2' 'SystemCallFilter=~@mount @reboot @swap @raw-io' ProtectKernelLogs ProtectClock ProtectHostname PrivateIPC; do
+  assert_directive hostlens-gateway.service "${directive}"
+  assert_directive hostlens-diagnostics.service "${directive}"
+done
+for directive in ProtectProc=invisible ProcSubset=pid MemoryDenyWriteExecute; do
+  assert_directive hostlens-gateway.service "${directive}"
+done
 systemd-analyze verify /etc/systemd/system/hostlens-gateway.service /etc/systemd/system/hostlens-diagnostics.service
 systemctl start hostlens-diagnostics.service hostlens-gateway.service
 ready
@@ -224,6 +238,10 @@ hostlens reconcile --system --apply >/tmp/reconcile-docker-applied.json
 getent group hostlens-observer
 getent passwd hostlens-observer
 test -x /usr/local/bin/hostlens-docker-observer
+test "$(hostlens-docker-observer version)" = "${HOSTLENS_VERSION}"
+for directive in ProtectProc=invisible ProcSubset=pid ProtectKernelLogs ProtectClock ProtectHostname PrivateIPC; do
+  assert_directive hostlens-docker-observer.service "${directive}"
+done
 test -e /etc/systemd/system/hostlens-docker-observer.socket
 test -e /etc/systemd/system/hostlens-docker-observer.service
 # The container has no Docker engine: a never-started stub unit satisfies

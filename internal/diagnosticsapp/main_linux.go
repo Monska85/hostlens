@@ -2,8 +2,6 @@ package diagnosticsapp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +15,7 @@ import (
 	"github.com/Monska85/hostlens/internal/backend"
 	"github.com/Monska85/hostlens/internal/contract"
 	linux "github.com/Monska85/hostlens/internal/platform/linux"
+	"github.com/Monska85/hostlens/internal/token"
 )
 
 func Main(args []string) error {
@@ -81,15 +80,13 @@ func Main(args []string) error {
 		return e
 	}
 	defer listener.Close()
-	b := make([]byte, 12)
-	rand.Read(b)
 	s := backend.New(snap, load, func(s backend.Snapshot) contract.Collector {
 		c := &linux.Collector{Config: s.Config, Policy: s.Policy}
 		if s.Config.Docker.Enabled {
 			c.Docker = linux.NewObserverClient(s.Config.Docker.ObserverSocket)
 		}
 		return c
-	}, hex.EncodeToString(b))
+	}, token.Random(12))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	server := newServer(s.Handler())

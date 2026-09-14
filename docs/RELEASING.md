@@ -86,14 +86,14 @@ A failed run returns failure and removes previous managed reports. Cancellation 
 
 ## Hosted CI
 
-CI runs on branch pushes, pull requests, and manual dispatch. The release workflow reuses it for tags. The jobs are:
+CI runs on default-branch pushes, pull requests, and manual dispatch. The release workflow reuses it for tags. The jobs are:
 
 1. **Checks:** Locked tool setup, formatting, lint, vulnerability scan, and container regression tests with coverage reports.
 2. **Build:** One versioned amd64/arm64 candidate with checked transport checksums.
-3. **Matrix:** Independent platform and lifecycle jobs verifying, extracting, and executing that exact candidate. Debian arm64 runs natively on `ubuntu-24.04-arm`; amd64 platform and systemd cases use `ubuntu-24.04`. Platform preparation verifies the engine architecture and pulls the matching image; hosted cases do not use QEMU.
+3. **Matrix:** Independent platform and lifecycle jobs verifying, extracting, and executing that exact candidate. Debian arm64 runs natively on `ubuntu-24.04-arm`, and both systemd acceptance cases also run natively on arm64; amd64 platform and systemd cases use `ubuntu-24.04`. Platform preparation verifies the engine architecture and pulls the matching image; hosted cases do not use QEMU.
 4. **Gate:** Fails if checks, build, or any required matrix case fails or is skipped.
 
-Use `CI gate` as the aggregate required check. Workflows use read-only permissions except release delivery, and checkout does not retain credentials. External actions and critical tool images use commit or digest pins; distribution tags intentionally track representative releases. Update pins deliberately and rerun acceptance.
+Use `CI gate` as the aggregate required check. Workflows use read-only permissions except release delivery, and checkout does not retain credentials. External actions and critical tool images use commit or digest pins; distribution tags intentionally track representative releases. Update pins deliberately and rerun acceptance. Dependabot proposes weekly PRs for `github-actions` and `tools/dev` Go modules; SHA-pinned actions arrive as version-bump PRs, and every pin update is reviewed and accepted deliberately rather than merged automatically.
 
 GitHub provides [standard arm64 runners for public and private repositories](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). The [Ubuntu arm64 image](https://github.com/actions/partner-runner-images/blob/main/images/arm-ubuntu-24-image.md) includes Docker and Python. Native hosted evidence requires a successful run of this configuration; local emulation remains separate evidence.
 
@@ -135,11 +135,11 @@ Release publication requires owner authorization. Before tagging, review [valida
 
 1. Select a reviewed commit in the default branch history and an unused `vMAJOR.MINOR.PATCH` tag, optionally with a SemVer prerelease suffix. Build metadata suffixes are unsupported.
 2. Create and push the tag through the authorized Git workflow. The release workflow validates tag syntax and ancestry, then runs the full CI suite.
-3. The delivery job downloads the tested archives from that run. The standard `gh` CLI attaches the two archives and checksums to a draft after checking their hashes, without rebuilding.
-4. Inspect the draft, test results, and release notes before publishing. A failed upload may leave a partial draft; never silently replace published assets.
+3. The delivery job downloads the tested archives from that run. The standard `gh` CLI attaches the two archives and checksums to a draft after checking their hashes, without rebuilding, and records GitHub build provenance attestations (`actions/attest-build-provenance`) for the archives and the checksum manifest. Attestations require a public (or org-owned paid) repository; while the repository is private the publish job reports their unavailability explicitly and delivery stays checksum-verified. Once public, repository readers verify with `gh attestation verify <asset> -R Monska85/hostlens`.
+4. Inspect the draft, test results, and release notes before publishing. A failed upload may leave a partial draft; never silently replace published assets. The publish job refuses to run when the release already exists instead of creating a duplicate draft.
 
 `make release-check` validates the GoReleaser packaging configuration and requires the pinned GoReleaser version. Only delivery receives `contents: write` through `GITHUB_TOKEN`; no host rollout credentials are needed.
 
-Archives include the upgrade manifest, project license, attribution, and dependency notices. Checksums detect corruption, not independently authenticated publisher identity. Draft upload, signing, and provenance are distinct from local archive verification; [validation evidence](v1/VALIDATION.md) records what has actually run.
+Archives include the upgrade manifest, project license, attribution, and dependency notices. Checksums detect corruption, not independently authenticated publisher identity; the release workflow records build provenance attestations to authenticate the build's origin. Draft upload, signing, and provenance are distinct from local archive verification; [validation evidence](v1/VALIDATION.md) records what has actually run.
 
 Operators perform explicit [upgrades](v1/OPERATIONS.md#audit-upgrade-and-removal). Publishing a release never changes a server.

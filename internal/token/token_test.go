@@ -165,6 +165,70 @@ func TestStoreSizeFailurePreservesActiveCredentials(t *testing.T) {
 	}
 }
 
+func TestStoreDirectoryPreconditions(t *testing.T) {
+	secret := "unrelated"
+	// A trusted store directory keeps authentication and administration working.
+	s := Store{Path: filepath.Join(t.TempDir(), "tokens.json"), AdminUID: os.Geteuid()}
+	if _, _, err := s.Create("client", []string{"health"}, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Verify(secret); err == nil || err.Error() == "protected token directory required" {
+		t.Fatal("trusted directory precondition failed", err)
+	}
+	if err := os.Chmod(filepath.Dir(s.Path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Create("client", []string{"health"}, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		mode os.FileMode
+	}{{"group-write", 0720}, {"other-write", 0702}, {"group-other-write", 0723}} {
+		dir := t.TempDir()
+		st := Store{Path: filepath.Join(dir, "tokens.json"), AdminUID: os.Geteuid()}
+		if err := os.Chmod(dir, tc.mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Verify(secret); err == nil || err.Error() != "protected token directory required" {
+			t.Fatalf("%s directory accepted for verification: %v", tc.name, err)
+		}
+		if _, _, err := st.Create("client", []string{"health"}, time.Now().Add(time.Hour)); err == nil || err.Error() != "protected token directory required" {
+			t.Fatalf("%s directory accepted for administration: %v", tc.name, err)
+		}
+	}
+	// A symlinked store directory must be refused like a symlinked store file.
+	link := filepath.Join(t.TempDir(), "link")
+	target := t.TempDir()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	st := Store{Path: filepath.Join(link, "tokens.json"), AdminUID: os.Geteuid()}
+	if _, err := st.Verify(secret); err == nil || err.Error() != "protected token directory required" {
+		t.Fatalf("symlinked directory accepted: %v", err)
+	}
+	// Owner checks require chown authority: rootful container tests only.
+	if os.Getuid() != 0 {
+		return
+	}
+	dir := t.TempDir()
+	st = Store{Path: filepath.Join(dir, "tokens.json"), AdminUID: os.Geteuid()}
+	if _, _, err := st.Create("client", []string{"health"}, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(dir, 1000, -1); err == nil {
+		if _, err := st.Verify(secret); err == nil || err.Error() != "protected token directory required" {
+			t.Fatalf("untrusted directory owner accepted: %v", err)
+		}
+		if err := os.Chown(dir, 0, -1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Verify(secret); err != nil {
+			t.Fatal("root-owned directory refused", err)
+		}
+	}
+}
+
 func TestTokenStoreRejectsNonRegularAndTrailingData(t *testing.T) {
 	for _, suffix := range []string{" {}", " []", " garbage"} {
 		t.Run(suffix, func(t *testing.T) {

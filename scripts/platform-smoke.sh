@@ -47,7 +47,7 @@ YAML
 fi
 cat /etc/os-release
 printf '%s\n' 'HOSTLENS_STAGE: verify versions and configuration'
-for binary in hostlens hostlens-diagnostics; do
+for binary in hostlens hostlens-diagnostics hostlens-docker-observer; do
   actual=$(run_binary "/tmp/release/${binary}" version)
   if [ "${actual}" != "${HOSTLENS_VERSION}" ]; then
     printf 'Version mismatch for %s: %s instead of %s\n' "${binary}" "${actual}" "${HOSTLENS_VERSION}" >&2

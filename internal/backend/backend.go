@@ -19,6 +19,13 @@ import (
 	"github.com/Monska85/hostlens/internal/telemetry"
 )
 
+// Lifecycle IPC request ceilings: control requests carry a generation only;
+// call requests carry the bounded diagnostic argument set.
+const (
+	maxControlRequestBytes = 1024
+	maxCallRequestBytes    = 65536
+)
+
 type Snapshot struct {
 	Config      config.Config
 	Policy      *policy.Policy
@@ -151,7 +158,7 @@ func (s *Server) Handler() http.Handler {
 			var want struct {
 				Generation string `json:"generation"`
 			}
-			if decode(r, &want, 1024) != nil {
+			if decode(r, &want, maxControlRequestBytes) != nil {
 				http.Error(w, "invalid request", 400)
 				return
 			}
@@ -201,7 +208,7 @@ func (s *Server) Handler() http.Handler {
 			var want struct {
 				Generation string `json:"generation"`
 			}
-			if decode(r, &want, 1024) != nil {
+			if decode(r, &want, maxControlRequestBytes) != nil {
 				http.Error(w, "invalid request", 400)
 				return
 			}
@@ -222,7 +229,7 @@ func (s *Server) Handler() http.Handler {
 			respond(w, map[string]bool{"active": true})
 		case "/call":
 			var req contract.Request
-			if e := decode(r, &req, 65536); e != nil {
+			if e := decode(r, &req, maxCallRequestBytes); e != nil {
 				http.Error(w, "invalid request", 400)
 				return
 			}
