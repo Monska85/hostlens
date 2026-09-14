@@ -1,6 +1,6 @@
 # Operating HostLens
 
-HostLens is a local implementation candidate for Linux amd64 and arm64. It exposes diagnostic tools through bearer-authenticated Streamable HTTP at `/mcp` and service telemetry at `/metrics`. It does not execute remediation, schedule monitoring, retain inspected content, or call model providers. See [validation evidence](VALIDATION.md) before deployment. Release archives are prepared and validated as drafts by the release workflow and stay unpublished while the repository is private; verification procedures live in the repository's `docs/RELEASING.md`, and `SECURITY.md` records the support policy.
+HostLens is a local implementation candidate for Linux amd64 and arm64. It exposes diagnostic tools through bearer-authenticated Streamable HTTP at `/mcp` and service telemetry at `/metrics`. It does not execute remediation, schedule monitoring, retain inspected content, or call model providers. See [validation evidence](VALIDATION.md) before deployment. Release archives are prepared and validated as drafts by the release workflow and published on the [GitHub Releases page](https://github.com/Monska85/hostlens/releases) after maintainer approval; verification procedures live in the repository's `docs/RELEASING.md`, and `SECURITY.md` records the support policy.
 
 ## Prerequisites
 
