@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Overhaul the README into a landing page: workflow and fact badges, a copy-paste quick start with a minimal config, feature and refusal tables, a Mermaid architecture diagram, and a documentation matrix; all prose stays ASCII with plain punctuation.
+
 ## 0.2.0 - 2026-09-14
 
 [Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.1.0...v0.2.0)
