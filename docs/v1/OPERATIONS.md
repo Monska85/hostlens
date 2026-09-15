@@ -36,10 +36,11 @@ Diagnostics collect live evidence for each request. HostLens does not retain res
 
 ## Tokens and roles
 
-Run token commands as root for system instances, or as the owning user for user instances. Every token requires a name, roles, and an explicit RFC3339 expiry. Creation and rotation print the secret once; protect that output and never paste it into logs or issue reports.
+Run token commands as root for system instances, or as the owning user for user instances. Every token requires a name, roles, and an explicit RFC3339 expiry or the `never` sentinel. Creation and rotation print the secret once; protect that output and never paste it into logs or issue reports.
 
 ```sh
 hostlens token create --system --name laptop --roles diagnostics --expires 2030-01-01T00:00:00Z
+hostlens token create --system --name service --roles health --expires never
 hostlens token list --system
 hostlens token list --system --all
 hostlens token update --system --id PUBLIC_ID --roles health
@@ -47,7 +48,7 @@ hostlens token rotate --system --id PUBLIC_ID --expires 2030-01-01T00:00:00Z --o
 hostlens token revoke --system --id PUBLIC_ID
 ```
 
-Choose expiry and overlap dates appropriate to the operation; overlap cannot extend the old token's existing expiry. Listing never returns hashes or secrets. Updates replace the role set. Revocation, expiry, and role changes apply to the next request, including clients that remember previously available tools.
+Choose expiry and overlap dates appropriate to the operation; overlap cannot extend the old token's existing expiry. A token created with `--expires never` stays valid until revoked or rotated: rotation imposes the overlap deadline on the old token as its retirement date, and the replacement may itself be non-expiring. Revocation is the instant kill for any token, including non-expiring ones. Older binaries that predate the sentinel treat such tokens as already expired and reject them. `token create`, `token list`, and `token rotate` display a non-expiring token's expiry as `never`. Listing never returns hashes or secrets. Updates replace the role set. Revocation, expiry, and role changes apply to the next request, including clients that remember previously available tools.
 
 | Role          | Tools                                                                    |
 | ------------- | ------------------------------------------------------------------------ |

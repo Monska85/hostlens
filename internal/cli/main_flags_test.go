@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Monska85/hostlens/internal/config"
 	"go.yaml.in/yaml/v3"
@@ -47,6 +49,68 @@ func captureStdout(t *testing.T, run func()) string {
 	run()
 	w.Close()
 	return <-done
+}
+
+func TestNeverExpiringTokenCLI(t *testing.T) {
+	path := userConfigPath(t)
+	var out string
+	out = captureStdout(t, func() {
+		if e := Main([]string{"token", "create", "--config", path,
+			"--name", "immortal", "--roles", "diagnostics", "--expires", "never"}); e != nil {
+			t.Fatal(e)
+		}
+	})
+	if !strings.Contains(out, `"expires": "never"`) || strings.Contains(out, "0001-01-01") {
+		t.Fatalf("sentinel not displayed as never: %s", out)
+	}
+	// Extract the secret for the verification round trip.
+	var created struct {
+		Secret string `json:"secret"`
+	}
+	if e := json.Unmarshal([]byte(out), &created); e != nil {
+		t.Fatal(e)
+	}
+	if created.Secret == "" {
+		t.Fatal("secret missing")
+	}
+	// Rotation of a never token: finite overlap for the old, never replacement.
+	out = captureStdout(t, func() {
+		if e := Main([]string{"token", "list", "--config", path, "--all"}); e != nil {
+			t.Fatal(e)
+		}
+	})
+	var listed []struct {
+		ID      string   `json:"id"`
+		Expires string   `json:"expires"`
+		Status  string   `json:"status"`
+		Roles   []string `json:"roles"`
+	}
+	if e := json.Unmarshal([]byte(out), &listed); e != nil {
+		t.Fatal(e)
+	}
+	if len(listed) != 1 || listed[0].Expires != "never" || listed[0].Status != "active" {
+		t.Fatalf("list lost the sentinel: %s", out)
+	}
+	id := listed[0].ID
+	overlap := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+	out = captureStdout(t, func() {
+		if e := Main([]string{"token", "rotate", "--config", path, "--id", id,
+			"--expires", "never", "--overlap-until", overlap}); e != nil {
+			t.Fatal(e)
+		}
+	})
+	if !strings.Contains(out, `"expires": "never"`) {
+		t.Fatalf("rotated replacement lost the sentinel: %s", out)
+	}
+	// Expired dates still fail the parser; never is the only sentinel.
+	if e := Main([]string{"token", "create", "--config", path,
+		"--name", "bad", "--roles", "health", "--expires", "someday"}); e == nil {
+		t.Fatal("invalid expiry accepted")
+	}
+	if e := Main([]string{"token", "create", "--config", path,
+		"--name", "bad", "--roles", "health"}); e == nil {
+		t.Fatal("empty expiry accepted")
+	}
 }
 
 func TestMainShowsHelpAndVersion(t *testing.T) {

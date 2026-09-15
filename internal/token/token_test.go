@@ -270,6 +270,89 @@ func TestTokenStoreRejectsNonRegularAndTrailingData(t *testing.T) {
 	}
 }
 
+func TestNeverExpiringTokens(t *testing.T) {
+	t.Parallel()
+
+	s := Store{Path: filepath.Join(t.TempDir(), "tokens.json"), AdminUID: os.Geteuid()}
+	r, secret, err := s.Create("immortal", []string{"diagnostics"}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Expires.IsZero() {
+		t.Fatal("sentinel lost")
+	}
+	// Verification ignores only the date: the credential works far past creation.
+	if err = s.change(func(rs *[]Record) error {
+		for i := range *rs {
+			(*rs)[i].Expires = time.Time{}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Verify(secret); err != nil {
+		t.Fatal("non-expiring credential rejected", err)
+	}
+
+	// Listing must not auto-expire the sentinel.
+	rows, err := s.List(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Status != "active" {
+		t.Fatalf("sentinel listed as %v", rows)
+	}
+	// Revocation is the instant kill.
+	if err = s.Update(r.ID, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Verify(secret); err == nil {
+		t.Fatal("revoked non-expiring token accepted")
+	}
+}
+
+func TestRotateNeverExpiringToken(t *testing.T) {
+	t.Parallel()
+
+	s := Store{Path: filepath.Join(t.TempDir(), "tokens.json"), AdminUID: os.Geteuid()}
+	r, secret, err := s.Create("immortal", []string{"health"}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The replacement may itself be non-expiring; the old token receives a
+	// finite retirement deadline.
+	overlap := time.Now().Add(24 * time.Hour)
+	replacement, newSecret, err := s.Rotate(r.ID, time.Time{}, overlap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replacement.Expires.IsZero() {
+		t.Fatal("replacement sentinel lost")
+	}
+	if _, err = s.Verify(secret); err != nil {
+		t.Fatal("old token died before its overlap deadline", err)
+	}
+	if _, err = s.Verify(newSecret); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.change(func(rs *[]Record) error {
+		for i := range *rs {
+			if (*rs)[i].ID == r.ID {
+				(*rs)[i].Expires = time.Now().Add(-time.Second)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Verify(secret); err == nil {
+		t.Fatal("old token survived its overlap deadline")
+	}
+	if _, err = s.Verify(newSecret); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMetricsRoleIsIndependent(t *testing.T) {
 	if !RolesOK([]string{"metrics"}) || RolesOK([]string{"admin"}) {
 		t.Fatal("role validation")

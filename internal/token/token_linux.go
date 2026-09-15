@@ -69,6 +69,9 @@ func (s Store) read() ([]Record, error) {
 	}
 	return records, nil
 }
+
+// Verify accepts the zero-expiry sentinel as non-expiring: only the date
+// comparison is bypassed. Status, revocation, and role checks stay per-call.
 func (s Store) Verify(secret string) (Record, error) {
 	if len(secret) > 256 {
 		return Record{}, errors.New("invalid credential")
@@ -79,7 +82,7 @@ func (s Store) Verify(secret string) (Record, error) {
 	}
 	h := hash(secret)
 	for _, r := range records {
-		if subtle.ConstantTimeCompare([]byte(h), []byte(r.Hash)) == 1 && r.Status == "active" && time.Now().Before(r.Expires) {
+		if subtle.ConstantTimeCompare([]byte(h), []byte(r.Hash)) == 1 && r.Status == "active" && (r.Expires.IsZero() || time.Now().Before(r.Expires)) {
 			r.Hash = ""
 			return r, nil
 		}
@@ -149,8 +152,13 @@ func Atomic(path string, data []byte, mode os.FileMode) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// A zero expiry is the non-expiring sentinel: verification never rejects it
+// on its date, and rotation imposes a finite overlap deadline on the old
+// token. Older binaries that require expirations read the sentinel as an
+// already-expired token and fail closed.
 func (s Store) Create(name string, roles []string, expiry time.Time) (Record, string, error) {
-	if strings.TrimSpace(name) == "" || len(name) > 128 || !RolesOK(roles) || !expiry.After(time.Now()) {
+	if strings.TrimSpace(name) == "" || len(name) > 128 || !RolesOK(roles) || (!expiry.IsZero() && !expiry.After(time.Now())) {
 		return Record{}, "", errors.New("name, valid roles, and future expiry required")
 	}
 	secret := Random(32)
@@ -169,7 +177,7 @@ func (s Store) List(all bool) ([]Record, error) {
 	}
 	out := []Record{}
 	for _, r := range rs {
-		if r.Status == "active" && !time.Now().Before(r.Expires) {
+		if r.Status == "active" && !r.Expires.IsZero() && !time.Now().Before(r.Expires) {
 			r.Status = "expired"
 		}
 		if all || r.Status == "active" {
@@ -197,8 +205,12 @@ func (s Store) Update(id string, roles []string, revoke bool) error {
 		return fmt.Errorf("token ID not found")
 	})
 }
+
+// Rotate treats a zero new expiry as non-expiring and a zero old expiry as
+// infinite: any future overlap is acceptable, and the old token receives the
+// overlap as a finite retirement deadline.
 func (s Store) Rotate(id string, expiry, overlap time.Time) (Record, string, error) {
-	if !overlap.After(time.Now()) || overlap.After(expiry) {
+	if !overlap.After(time.Now()) || (!expiry.IsZero() && overlap.After(expiry)) {
 		return Record{}, "", errors.New("explicit future overlap not later than new expiry required")
 	}
 	secret := Random(32)
@@ -206,8 +218,8 @@ func (s Store) Rotate(id string, expiry, overlap time.Time) (Record, string, err
 	e := s.change(func(rs *[]Record) error {
 		for i := range *rs {
 			r := &(*rs)[i]
-			if r.ID == id && r.Status == "active" && r.Expires.After(time.Now()) {
-				if overlap.After(r.Expires) {
+			if r.ID == id && r.Status == "active" && (r.Expires.IsZero() || r.Expires.After(time.Now())) {
+				if !r.Expires.IsZero() && overlap.After(r.Expires) {
 					return errors.New("overlap exceeds old expiry")
 				}
 				r.Expires = overlap

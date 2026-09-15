@@ -73,12 +73,15 @@ systemctl is-active hostlens-diagnostics.service hostlens-gateway.service
 
 ## Issue a first token
 
-Roles are fixed: `health`, `inspect`, `diagnostics` (each includes the previous), and `metrics` (independent). Issue a diagnostics token and keep the secret from the output:
+Roles are fixed: `health`, `inspect`, `diagnostics` (each includes the previous), and `metrics` (independent). Issue a diagnostics token and keep the secret from the output. Prefer finite expiries; for credentials that must outlive rotation cycles, `--expires never` creates a non-expiring token that stays valid until revoked or rotated:
 
 ```sh
 /usr/local/bin/hostlens token create --system \
   --name first-client --roles diagnostics \
   --expires "$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)"
+
+/usr/local/bin/hostlens token create --system \
+  --name service-account --roles health --expires never
 ```
 
 The MCP endpoint defaults to `http://127.0.0.1:8080/mcp`. Bearer authentication is required on loopback. Call a first tool to confirm the full stack:

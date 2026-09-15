@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-15
+
+[Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.2.0...v0.3.0)
+
+### Added
+
+- Create non-expiring bearer tokens with `hostlens token create --expires never`: the token stays valid until revoked or rotated, rotation imposes a finite retirement deadline on the old token, and `create`, `list`, and `rotate` display such tokens with an `expires` of `never`; binaries from before this change reject them instead of granting indefinite validity.
+
 ### Changed
 
 - Overhaul the README into a landing page: workflow and fact badges, a copy-paste quick start with a minimal config, feature and refusal tables, a Mermaid architecture diagram, and a documentation matrix; all prose stays ASCII with plain punctuation.
+- Document the maintainer-approved publish flow: release drafts are published on the GitHub Releases page after review instead of staying unpublished.
 
 ## 0.2.0 - 2026-09-14
 

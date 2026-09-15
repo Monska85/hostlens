@@ -14,12 +14,12 @@ Diagnostic evidence is collection-worker-scoped. Collectors read live sources on
 
 ## Components and trust
 
-| Component        | Responsibility                                                                    | Boundary                                                                    |
-| ---------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Gateway          | Streamable HTTP, bearer verification, roles, MCP dispatch, audit, service metrics | Unprivileged service identity; access to token state and TLS key            |
-| Diagnostics      | Source authorization, collection, assessment, budgets                             | Separate identity; optional standard-mode read capability                   |
-| Docker observer  | Isolated system-wide Engine observations over a typed GET-only contract           | Dedicated non-login identity with process-scoped socket-group authority     |
-| Local CLI        | Tokens, policy explanation, reload/status, installation and upgrades              | Local administrator or owning-user authority; never granted by an MCP token |
+| Component       | Responsibility                                                                    | Boundary                                                                    |
+| --------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Gateway         | Streamable HTTP, bearer verification, roles, MCP dispatch, audit, service metrics | Unprivileged service identity; access to token state and TLS key            |
+| Diagnostics     | Source authorization, collection, assessment, budgets                             | Separate identity; optional standard-mode read capability                   |
+| Docker observer | Isolated system-wide Engine observations over a typed GET-only contract           | Dedicated non-login identity with process-scoped socket-group authority     |
+| Local CLI       | Tokens, policy explanation, reload/status, installation and upgrades              | Local administrator or owning-user authority; never granted by an MCP token |
 
 Gateway and backend communicate through structured local IPC with peer-identity checks. The diagnostic backend alone reaches the Docker observer through a second typed IPC endpoint whose peer check rejects every other identity. Each call carries a generation; the backend rejects inconsistent generations. Source policies are immutable snapshots, and status reports their cached fingerprint and generation together.
 
@@ -37,7 +37,7 @@ Standard mode grants only `CAP_DAC_READ_SEARCH` to diagnostics through systemd. 
 
 The independent `metrics` role authorizes only service scrapes. Diagnostic roles do not inherit it. See [service metrics](OPERATIONS.md#service-metrics) for the catalog and access controls.
 
-Token expiry, revocation, and role changes apply to subsequent requests and are checked again at tool execution. Discovery is not authorization. Tokens cannot administer the host or change policy.
+Token expiry, revocation, and role changes apply to subsequent requests and are checked again at tool execution. Tokens expire by default; an administrator may create a non-expiring token with `--expires never`, which revocation and rotation still control. Discovery is not authorization. Tokens cannot administer the host or change policy.
 
 Return observed values only. Missing optional measurements are omitted; failed collection produces structured issues alongside valid partial observations. Fatal execution failures set MCP `isError`. Health severity and coverage completeness are independent, so incomplete coverage cannot establish health.
 

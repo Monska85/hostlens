@@ -58,8 +58,8 @@ func Main(args []string) error {
 	path := f.String("config", "", "configuration path")
 	name := f.String("name", "", "token client name")
 	roles := f.String("roles", "", "comma-separated roles: health, inspect, diagnostics, metrics")
-	expires := f.String("expires", "", "required RFC3339 token expiry")
-	overlap := f.String("overlap-until", "", "required RFC3339 old-token overlap deadline")
+	expires := f.String("expires", "", "required RFC3339 token expiry or 'never'")
+	overlap := f.String("overlap-until", "", "required RFC3339 old-token overlap deadline (a finite date)")
 	id := f.String("id", "", "public token ID")
 	all := f.Bool("all", false, "include inactive token metadata")
 	recursive := f.Bool("recursive", false, "bounded recursive policy explanation")
@@ -118,7 +118,14 @@ func Main(args []string) error {
 		return nil
 	case "token":
 		store := token.Store{Path: snap.Config.TokenStore, AdminUID: uid}
-		parseTime := func(s string) (time.Time, error) { return time.Parse(time.RFC3339, s) }
+		// The literal never selects the non-expiring sentinel; the token
+		// package keeps time.Time semantics for every other value.
+		parseTime := func(s string) (time.Time, error) {
+			if s == "never" {
+				return time.Time{}, nil
+			}
+			return time.Parse(time.RFC3339, s)
+		}
 		roleList := strings.Split(*roles, ",")
 		switch sub {
 		case "create":
@@ -130,13 +137,17 @@ func Main(args []string) error {
 			if e != nil {
 				return e
 			}
-			return output(map[string]any{"token": r, "secret": secret})
+			return output(map[string]any{"token": displayToken(r), "secret": secret})
 		case "list":
 			rs, e := store.List(*all)
 			if e != nil {
 				return e
 			}
-			return output(rs)
+			shown := make([]map[string]any, len(rs))
+			for i, r := range rs {
+				shown[i] = displayToken(r)
+			}
+			return output(shown)
 		case "update", "revoke":
 			return store.Update(*id, roleList, sub == "revoke")
 		case "rotate":
@@ -152,7 +163,7 @@ func Main(args []string) error {
 			if e != nil {
 				return e
 			}
-			return output(map[string]any{"token": r, "secret": secret})
+			return output(map[string]any{"token": displayToken(r), "secret": secret})
 		default:
 			return errors.New("unknown token command")
 		}
@@ -182,6 +193,16 @@ func Main(args []string) error {
 	}
 }
 func output(v any) error { e := json.NewEncoder(os.Stdout); e.SetIndent("", "  "); return e.Encode(v) }
+
+// displayToken renders a token record for humans: the zero-expiry sentinel
+// becomes "never" instead of a raw zero timestamp. The store keeps time.Time.
+func displayToken(r token.Record) map[string]any {
+	expires := r.Expires.Format(time.RFC3339)
+	if r.Expires.IsZero() {
+		expires = "never"
+	}
+	return map[string]any{"id": r.ID, "name": r.Name, "roles": r.Roles, "expires": expires, "status": r.Status}
+}
 func serve(snap backend.Snapshot, load backend.Loader, adminUID int) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
