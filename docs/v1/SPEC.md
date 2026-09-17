@@ -31,13 +31,17 @@ Standard mode grants only `CAP_DAC_READ_SEARCH` to diagnostics through systemd. 
 
 | Minimum role  | Tools                                                                             |
 | ------------- | --------------------------------------------------------------------------------- |
-| `health`      | `get_os_info`, `get_inventory`, `get_health_snapshot`                             |
+| `health`      | `get_os_info`, `get_inventory`, `get_health_snapshot`, `get_hostlens_info`        |
 | `inspect`     | Health tools plus `list_services`, `get_service_status`, `list_packages`          |
 | `diagnostics` | Inspect tools plus `read_config`, `query_logs` and explicitly granted audit tools |
+
+A `health`-role token can also read `get_hostlens_info` when its holder has the `hostlens` audit-domain grant; see [generic audit evidence](#generic-audit-evidence).
 
 The independent `metrics` role authorizes only service scrapes. Diagnostic roles do not inherit it. See [service metrics](OPERATIONS.md#service-metrics) for the catalog and access controls.
 
 Token expiry, revocation, and role changes apply to subsequent requests and are checked again at tool execution. Tokens expire by default; an administrator may create a non-expiring token with `--expires never`, which revocation and rotation still control. Discovery is not authorization. Tokens cannot administer the host or change policy.
+
+Each tool's argument and result schemas derive from one typed Go definition, published as the machine-readable snapshot `docs/v1/tools.json`. The gateway validates tool-call arguments against the input schema before backend contact and every backend result against the output schema, so a client can rely on the advertised member names and types.
 
 Return observed values only. Missing optional measurements are omitted; failed collection produces structured issues alongside valid partial observations. Fatal execution failures set MCP `isError`. Health severity and coverage completeness are independent, so incomplete coverage cannot establish health.
 

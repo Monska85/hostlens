@@ -24,15 +24,15 @@ func writeAuditFixture(t *testing.T, c *Collector, path, content string) {
 	fixtureOK(t, os.MkdirAll(filepath.Dir(p), 0700))
 	fixtureOK(t, os.WriteFile(p, []byte(content), 0600))
 }
-func auditTestResult() contract.Result {
-	return contract.Result{Data: map[string]any{"coverage_complete": true}}
+func auditTestResult(tool string) contract.Result {
+	return contract.Result{Data: newAuditPayload(tool)}
 }
 func TestProcessStatParsing(t *testing.T) {
 	t.Parallel()
 
 	stat := processFixtureStat(42, "worker ) (odd)")
 	out, e := parseProcessStat([]byte(stat), 42)
-	if e != nil || out["name"] != "worker ) (odd)" || out["start_ticks"] != uint64(123) {
+	if e != nil || out.Name != "worker ) (odd)" || out.StartTicks != 123 {
 		t.Fatalf("%v %v", out, e)
 	}
 	for _, bad := range []string{"", strings.Replace(stat, "123", "invalid", 1), strings.Replace(stat, "4096", "-1", 1), "42 (worker) S 1", strings.Replace(stat, "42 ", "43 ", 1)} {
@@ -53,25 +53,24 @@ func TestAuditProcessEvidenceAndDeniedSecrets(t *testing.T) {
 	fixtureOK(t, os.Symlink("/usr/bin/worker", filepath.Join(dir, "proc/42/exe")))
 	fixtureOK(t, os.Mkdir(filepath.Join(dir, "proc/42/fd"), 0700))
 	fixtureOK(t, os.Symlink("socket:[678]", filepath.Join(dir, "proc/42/fd/3")))
-	r := auditTestResult()
-	c.auditProcess(context.Background(), &r, contract.Args{PID: 42})
-	p, ok := r.Data["process"].(map[string]any)
-	if !ok || p["executable"] != "/usr/bin/worker" {
+	r := auditTestResult("get_process_info")
+	c.auditProcess(context.Background(), &r, contract.PIDArgs{PID: 42})
+	info, ok := r.Data.(*contract.ProcessInfo)
+	if !ok || info.Process == nil || info.Process.Executable != "/usr/bin/worker" {
 		t.Fatal(r)
 	}
-	inodes := p["socket_inodes"].([]uint64)
-	if len(inodes) != 1 || inodes[0] != 678 {
-		t.Fatal(p)
+	if len(info.Process.SocketInodes) != 1 || info.Process.SocketInodes[0] != 678 {
+		t.Fatal(info.Process)
 	}
 	b, _ := json.Marshal(r)
 	if strings.Contains(string(b), "SECRET") {
 		t.Fatal("secret exposed")
 	}
 	c.Policy.Rules = append(c.Policy.Rules, policy.Rule{Category: "files", Pattern: "/usr/bin/worker", Deny: true})
-	r = auditTestResult()
-	c.auditProcess(context.Background(), &r, contract.Args{PID: 42})
-	p = r.Data["process"].(map[string]any)
-	if _, ok := p["executable"]; ok || r.Data["coverage_complete"] != false {
+	r = auditTestResult("get_process_info")
+	c.auditProcess(context.Background(), &r, contract.PIDArgs{PID: 42})
+	info = r.Data.(*contract.ProcessInfo)
+	if info.Process == nil || info.Process.Executable != "" || auditCoverageOf(r) {
 		t.Fatal(r)
 	}
 }
@@ -85,28 +84,30 @@ func TestAuditProcessesPagingAndBudget(t *testing.T) {
 	}
 	writeAuditFixture(t, c, "/proc/50/stat", "malformed")
 	c.Policy.Rules = append(c.Policy.Rules, policy.Rule{Category: "files", Pattern: "/proc/100/stat", Deny: true})
-	r := auditTestResult()
-	c.auditProcesses(context.Background(), &r, contract.Args{Limit: 1, Offset: 1})
-	items := r.Data["items"].([]map[string]any)
-	if len(items) != 1 || items[0]["pid"] != 40 || r.NextOffset == nil || *r.NextOffset != 2 || len(r.Issues) != 0 || r.Data["enumerated_processes"] != 4 || r.Data["observed_processes"] != 1 {
+	r := auditTestResult("list_processes")
+	c.auditProcesses(context.Background(), &r, contract.PageArgs{Limit: 1, Offset: 1})
+	page := r.Data.(*contract.ProcessPage)
+	if len(page.Items) != 1 || page.Items[0].PID != 40 || r.NextOffset == nil || *r.NextOffset != 2 || len(r.Issues) != 0 || page.EnumeratedProcesses != 4 || page.ObservedProcesses != 1 {
 		t.Fatal(r)
 	}
 	// Offsets follow the PID inventory even when the selected process is malformed.
-	r = auditTestResult()
-	c.auditProcesses(context.Background(), &r, contract.Args{Limit: 1, Offset: 2})
-	if len(r.Data["items"].([]map[string]any)) != 0 || r.NextOffset == nil || *r.NextOffset != 3 || r.Data["coverage_complete"] != false {
+	r = auditTestResult("list_processes")
+	c.auditProcesses(context.Background(), &r, contract.PageArgs{Limit: 1, Offset: 2})
+	page = r.Data.(*contract.ProcessPage)
+	if len(page.Items) != 0 || r.NextOffset == nil || *r.NextOffset != 3 || auditCoverageOf(r) {
 		t.Fatal(r)
 	}
-	r = auditTestResult()
-	c.auditProcesses(context.Background(), &r, contract.Args{Limit: 1, Offset: 3})
-	if len(r.Data["items"].([]map[string]any)) != 0 || r.NextOffset != nil || r.Data["coverage_complete"] != false {
+	r = auditTestResult("list_processes")
+	c.auditProcesses(context.Background(), &r, contract.PageArgs{Limit: 1, Offset: 3})
+	page = r.Data.(*contract.ProcessPage)
+	if len(page.Items) != 0 || r.NextOffset != nil || auditCoverageOf(r) {
 		t.Fatal(r)
 	}
 	budget := len(processFixtureStat(2, "worker")) + 2
 	c.auditRemaining = &budget
-	r = auditTestResult()
-	c.auditProcesses(context.Background(), &r, contract.Args{})
-	if !r.Truncated || r.Data["observed_processes"] != 1 {
+	r = auditTestResult("list_processes")
+	c.auditProcesses(context.Background(), &r, contract.PageArgs{})
+	if !r.Truncated || r.Data.(*contract.ProcessPage).ObservedProcesses != 1 {
 		t.Fatal(r)
 	}
 	// Malformed, denied, and absent sources keep their own classification
@@ -117,8 +118,8 @@ func TestAuditProcessesPagingAndBudget(t *testing.T) {
 	writeAuditFixture(t, c2, "/proc/2/stat", processFixtureStat(2, "worker"))
 	fixtureOK(t, os.MkdirAll(filepath.Join(root2, "proc/3"), 0700))
 	c2.Policy.Rules = append(c2.Policy.Rules, policy.Rule{Category: "files", Pattern: "/proc/2/stat", Deny: true})
-	r = auditTestResult()
-	c2.auditProcesses(context.Background(), &r, contract.Args{})
+	r = auditTestResult("list_processes")
+	c2.auditProcesses(context.Background(), &r, contract.PageArgs{})
 	for _, code := range []string{"malformed_source", "policy_denied", "source_unavailable"} {
 		if !auditHasIssue(r, code) {
 			t.Fatalf("missing %s classification: %+v", code, r)
@@ -146,17 +147,18 @@ func TestAuditProcessAbsentAndCancellation(t *testing.T) {
 
 	c, dir := fixture(t)
 	c.Root = dir
-	r := auditTestResult()
-	c.auditProcess(context.Background(), &r, contract.Args{PID: 42})
-	if r.Data["process"] != nil || r.Data["coverage_complete"] != false {
+	r := auditTestResult("get_process_info")
+	c.auditProcess(context.Background(), &r, contract.PIDArgs{PID: 42})
+	info := r.Data.(*contract.ProcessInfo)
+	if info.Process != nil || auditCoverageOf(r) {
 		t.Fatal(r)
 	}
 	writeAuditFixture(t, c, "/proc/42/stat", processFixtureStat(42, "worker"))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	r = auditTestResult()
-	c.auditProcess(ctx, &r, contract.Args{PID: 42})
-	if r.Data["process"] != nil {
+	r = auditTestResult("get_process_info")
+	c.auditProcess(ctx, &r, contract.PIDArgs{PID: 42})
+	if r.Data.(*contract.ProcessInfo).Process != nil {
 		t.Fatal(r)
 	}
 }
@@ -216,10 +218,10 @@ func TestProcessFinalReadLimitPreservesUnverifiedEvidence(t *testing.T) {
 	writeAuditFixture(t, c, "/proc/42/status", "Uid:\t1000 1000 1000 1000\n")
 	budget := len(stat)
 	c.auditRemaining = &budget
-	r := auditTestResult()
-	c.auditProcess(context.Background(), &r, contract.Args{PID: 42})
-	process, ok := r.Data["process"].(map[string]any)
-	if !ok || process["pid"] != 42 || process["identity_rechecked"] != false || !r.Truncated || !auditHasIssue(r, "inspection_limit") || !auditHasIssue(r, "identity_unverified") || auditHasIssue(r, "process_changed") {
+	r := auditTestResult("get_process_info")
+	c.auditProcess(context.Background(), &r, contract.PIDArgs{PID: 42})
+	info, ok := r.Data.(*contract.ProcessInfo)
+	if !ok || info.Process == nil || info.Process.PID != 42 || info.Process.IdentityRechecked || !r.Truncated || !auditHasIssue(r, "inspection_limit") || !auditHasIssue(r, "identity_unverified") || auditHasIssue(r, "process_changed") {
 		t.Fatalf("limit masqueraded as identity race: %+v", r)
 	}
 }

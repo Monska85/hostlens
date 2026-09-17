@@ -14,6 +14,7 @@ import (
 
 	"github.com/Monska85/hostlens/internal/config"
 	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/dockerobs"
 	observerapp "github.com/Monska85/hostlens/internal/observerapp"
 	"github.com/Monska85/hostlens/internal/policy"
 	"github.com/Monska85/hostlens/internal/token"
@@ -138,7 +139,7 @@ func liveStack(t *testing.T, socket string, gid int) *Collector {
 	return &Collector{Config: c, Policy: p, Docker: NewObserverClient(observerSocket)}
 }
 
-func collectTool(t *testing.T, c *Collector, tool string, a contract.Args) contract.Result {
+func collectTool(t *testing.T, c *Collector, tool string, a any) contract.Result {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), contract.MaxToolTimeout)
 	defer cancel()
@@ -152,59 +153,60 @@ func TestLiveDockerEngineObservations(t *testing.T) {
 	defer func() { assertUnchanged(t, before, dockerSnapshot(t)) }()
 	t.Logf("engine: %s", strings.TrimSpace(firstLine(before)))
 
-	info := collectTool(t, c, "get_docker_info", contract.Args{})
-	if info.Error || info.Data["available"] != true {
+	info := collectTool(t, c, "get_docker_info", contract.NoArgs{})
+	if info.Error || !dockerInfoOf(info).Available {
 		t.Fatalf("engine info: %v %v", info.Error, info.Issues)
 	}
-	if info.Data["server_version"] == "" || info.Data["negotiated_api"] == "" {
+	engine := dockerInfoOf(info)
+	if engine.ServerVersion == "" || engine.NegotiatedAPI == "" {
 		t.Fatal("engine identity incomplete", info.Data)
 	}
-	t.Logf("engine info: version=%s api=%s storage=%s cgroup=%s", info.Data["server_version"], info.Data["negotiated_api"], info.Data["storage_driver"], info.Data["cgroup_version"])
+	t.Logf("engine info: version=%s api=%s storage=%s cgroup=%s", engine.ServerVersion, engine.NegotiatedAPI, engine.StorageDriver, engine.CgroupVersion)
 
-	containers := collectTool(t, c, "list_docker_containers", contract.Args{})
+	containers := collectTool(t, c, "list_docker_containers", contract.PageArgs{})
 	if containers.Error {
 		t.Fatalf("containers: %v", containers.Issues)
 	}
-	items := containers.Data["items"].([]map[string]any)
+	items := dockerPageOf[dockerobs.ContainerPayload](containers).Items
 	t.Logf("containers: %d observed, issues %v", len(items), issueCodes(containers))
 	for _, item := range items {
-		if item["id"] == nil || item["state"] == nil || item["image_id"] == nil {
+		if item.ID == "" || item.State == "" || item.ImageID == "" {
 			t.Fatal("container inventory incomplete", item)
 		}
 	}
 
-	images := collectTool(t, c, "list_docker_images", contract.Args{})
+	images := collectTool(t, c, "list_docker_images", contract.PageArgs{})
 	if images.Error {
 		t.Fatalf("images: %v", images.Issues)
 	}
-	volumes := collectTool(t, c, "list_docker_volumes", contract.Args{})
+	volumes := collectTool(t, c, "list_docker_volumes", contract.PageArgs{})
 	if volumes.Error {
 		t.Fatalf("volumes: %v", volumes.Issues)
 	}
-	networks := collectTool(t, c, "list_docker_networks", contract.Args{})
+	networks := collectTool(t, c, "list_docker_networks", contract.PageArgs{})
 	if networks.Error {
 		t.Fatalf("networks: %v", networks.Issues)
 	}
-	usage := collectTool(t, c, "get_docker_disk_usage", contract.Args{})
+	usage := collectTool(t, c, "get_docker_disk_usage", contract.NoArgs{})
 	if usage.Error {
 		t.Fatalf("disk usage: %v", usage.Issues)
 	}
 	t.Logf("disk usage issues: %v", issueCodes(usage))
 
 	if len(items) > 0 {
-		id := items[0]["id"].(string)
-		detail := collectTool(t, c, "get_docker_container", contract.Args{Container: id})
+		id := items[0].ID
+		detail := collectTool(t, c, "get_docker_container", contract.ContainerArgs{Container: id})
 		if detail.Error {
 			t.Fatalf("detail: %v", detail.Issues)
 		}
-		if detail.Data["id"] != id {
+		if detail.Data.(*dockerobs.ContainerDetailPayload).ID != id {
 			t.Fatal("detail identity mismatch")
 		}
-		stats := collectTool(t, c, "get_docker_container_stats", contract.Args{Container: id})
-		if state, ok := items[0]["state"].(string); ok && state == "running" && stats.Error {
+		stats := collectTool(t, c, "get_docker_container_stats", contract.ContainerArgs{Container: id})
+		if items[0].State == "running" && stats.Error {
 			t.Fatalf("running container stats: %v", stats.Issues)
 		}
-		logs := collectTool(t, c, "query_docker_logs", contract.Args{Container: id, Limit: 10})
+		logs := collectTool(t, c, "query_docker_logs", contract.DockerLogsArgs{Container: id, Limit: 10})
 		if logs.Error {
 			// Driver gaps and empty log streams stay honest failures.
 			t.Logf("logs for %s: %v", id, issueCodes(logs))
@@ -237,20 +239,20 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 	runDocker(t, "run", "-d", "--name", name, "--label", "hostlens-acceptance-unique="+name, "--mount", "source="+volumeName+",target=/data", "--network", networkName, "busybox", "sleep", "300")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
 
-	observed := collectTool(t, c, "list_docker_containers", contract.Args{})
+	observed := collectTool(t, c, "list_docker_containers", contract.PageArgs{})
 	if observed.Error {
 		t.Fatal(observed.Issues)
 	}
 	var fixtureID string
-	for _, item := range observed.Data["items"].([]map[string]any) {
-		if item["image"] == "busybox" && item["state"] == "running" {
-			fixtureID, _ = item["id"].(string)
+	for _, item := range dockerPageOf[dockerobs.ContainerPayload](observed).Items {
+		if item.Image == "busybox" && item.State == "running" {
+			fixtureID = item.ID
 		}
 	}
 	if fixtureID == "" {
 		t.Fatal("disposable container not observed live")
 	}
-	stats := collectTool(t, c, "get_docker_container_stats", contract.Args{Container: name})
+	stats := collectTool(t, c, "get_docker_container_stats", contract.ContainerArgs{Container: name})
 	if stats.Error {
 		t.Fatalf("running fixture stats: %v", stats.Issues)
 	}
@@ -270,21 +272,18 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 	// live observation without claiming an unused duration.
 	runDocker(t, "rm", "-f", name)
 	t.Cleanup(func() {})
-	afterRemove := collectTool(t, c, "list_docker_volumes", contract.Args{})
+	afterRemove := collectTool(t, c, "list_docker_volumes", contract.PageArgs{})
 	if afterRemove.Error {
 		t.Fatal(afterRemove.Issues)
 	}
 	unused := false
-	for _, item := range afterRemove.Data["items"].([]map[string]any) {
-		if item["name"] == volumeName {
-			if item["currently_unused"] != true {
+	for _, item := range dockerPageOf[dockerobs.VolumePayload](afterRemove).Items {
+		if item.Name == volumeName {
+			if !item.CurrentlyUnused {
 				t.Fatalf("unreferenced volume not classified unused: %v", item)
 			}
-			if _, claimsDuration := item["unused_since"]; claimsDuration {
-				t.Fatal("creation time must never become unused duration")
-			}
-			if _, claimsDuration := item["unused_duration"]; claimsDuration {
-				t.Fatal("unused duration must never be inferred")
+			if strings.Contains(mustJSON(t, item), "unused_since") || strings.Contains(mustJSON(t, item), "unused_duration") {
+				t.Fatal("unused duration must never be inferred from creation time")
 			}
 			unused = true
 		}
@@ -296,13 +295,13 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 
 func assertNotUnused(t *testing.T, c *Collector, name, tool string) {
 	t.Helper()
-	result := collectTool(t, c, tool, contract.Args{})
+	result := collectTool(t, c, tool, contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	for _, item := range result.Data["items"].([]map[string]any) {
-		if item["name"] == name {
-			if item["currently_unused"] == true {
+	for _, item := range dockerPageOf[dockerobs.VolumePayload](result).Items {
+		if item.Name == name {
+			if item.CurrentlyUnused {
 				t.Fatalf("%s %s referenced by a stopped container must not be unused", tool, name)
 			}
 			return

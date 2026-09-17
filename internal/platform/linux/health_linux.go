@@ -50,7 +50,12 @@ func cpu(b []byte) (float64, float64, error) {
 }
 func (c *Collector) health(ctx context.Context, r *contract.Result) {
 	r.Source = "Linux procfs, statfs, systemd"
-	checks := map[string]any{}
+	snap := contract.HealthSnapshot{
+		Checks:              map[string]contract.HealthCheck{},
+		MissingRequired:     []string{},
+		ExcludedFilesystems: c.Config.Health.ExcludeFilesystems,
+		Scope:               "current process-visible host resources; no application or historical health claim",
+	}
 	completed := map[string]bool{}
 	severity := "OK"
 	rank := map[string]int{"OK": 0, "warning": 1, "critical": 2}
@@ -61,7 +66,8 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 		} else if value >= t.Warning {
 			status = "warning"
 		}
-		checks[name] = map[string]any{"status": status, "value": value, "threshold": t}
+		v, threshold := value, contract.HealthThreshold{Warning: t.Warning, Critical: t.Critical}
+		snap.Checks[name] = contract.HealthCheck{Status: status, Value: &v, Threshold: &threshold}
 		if rank[status] > rank[severity] {
 			severity = status
 		}
@@ -71,8 +77,9 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 		total, tok := m["MemTotal"]
 		avail, aok := m["MemAvailable"]
 		if tok && aok && total > 0 {
-			r.Data["memory_total_bytes"] = total * 1024
-			r.Data["memory_available_bytes"] = avail * 1024
+			mt, ma := total*1024, avail*1024
+			snap.MemoryTotalBytes = &mt
+			snap.MemoryAvailableBytes = &ma
 			add("memory", 100*(total-avail)/total, c.Config.Health.Usage)
 			completed["memory"] = true
 		} else {
@@ -82,8 +89,9 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 		free, fok := m["SwapFree"]
 		if tok && fok {
 			used := total - free
-			r.Data["swap_total_bytes"] = total * 1024
-			r.Data["swap_used_bytes"] = used * 1024
+			st, su := total*1024, used*1024
+			snap.SwapTotalBytes = &st
+			snap.SwapUsedBytes = &su
 			pct := float64(0)
 			if total > 0 {
 				pct = 100 * used / total
@@ -96,8 +104,9 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 	}
 	var cpus unix.CPUSet
 	if e := unix.SchedGetaffinity(0, &cpus); e == nil {
-		r.Data["logical_cpus_available"] = cpus.Count()
-		r.Data["cpu_availability_scope"] = "scheduler affinity; cgroup CPU quotas may further restrict capacity"
+		n := cpus.Count()
+		snap.LogicalCPUsAvailable = &n
+		snap.CPUAvailabilityScope = "scheduler affinity; cgroup CPU quotas may further restrict capacity"
 	}
 	if b, e := c.file("/proc/loadavg", true); e == nil {
 		f := strings.Fields(string(b))
@@ -110,7 +119,7 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 				}
 			}
 			if len(vals) == 3 {
-				r.Data["load_1_5_15"] = vals
+				snap.Load15 = vals
 				if n := cpus.Count(); n > 0 {
 					add("load", vals[0]/float64(n), c.Config.Health.Load)
 					completed["load"] = true
@@ -120,7 +129,7 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 	} else {
 		r.Issue("collection_failed", "/proc/loadavg", e.Error())
 	}
-	filesystems := []map[string]any{}
+	filesystems := []contract.HealthFilesystem{}
 	fsOK := true
 	if b, e := c.file("/proc/self/mounts", true); e == nil {
 		seen := map[string]bool{}
@@ -167,11 +176,11 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 				continue
 			}
 			space := 100 * float64(st.Blocks-st.Bavail) / float64(st.Blocks)
-			item := map[string]any{"mount": mount, "type": f[2], "total_bytes": st.Blocks * uint64(st.Bsize), "available_bytes": st.Bavail * uint64(st.Bsize), "used_percent": space}
+			item := contract.HealthFilesystem{Mount: mount, Type: f[2], TotalBytes: st.Blocks * uint64(st.Bsize), AvailableBytes: st.Bavail * uint64(st.Bsize), UsedPercent: space}
 			add("filesystem:"+mount, space, c.Config.Health.Usage)
 			if st.Files > 0 {
 				inode := 100 * float64(st.Files-st.Ffree) / float64(st.Files)
-				item["inode_used_percent"] = inode
+				item.InodeUsedPercent = &inode
 				add("inodes:"+mount, inode, c.Config.Health.Usage)
 			}
 			filesystems = append(filesystems, item)
@@ -181,20 +190,22 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 		r.Issue("collection_failed", "/proc/self/mounts", e.Error())
 	}
 	if len(filesystems) > 0 {
-		r.Data["filesystems"] = filesystems
+		snap.Filesystems = filesystems
 		completed["filesystem"] = fsOK
 	}
-	r.Data["excluded_filesystems"] = c.Config.Health.ExcludeFilesystems
+	if snap.ExcludedFilesystems == nil {
+		snap.ExcludedFilesystems = []string{}
+	}
 	svc := contract.Result{}
-	items := c.serviceObservations(ctx, &svc)
-	if items != nil && (len(items) > 0 || len(svc.Issues) == 0) {
+	items, ok := c.serviceObservations(ctx, &svc)
+	if ok && (len(items) > 0 || len(svc.Issues) == 0) {
 		failed := []string{}
 		for _, item := range items {
-			if item["active"] == "failed" {
-				failed = append(failed, item["unit"].(string))
+			if item.Active == "failed" {
+				failed = append(failed, item.Unit)
 			}
 		}
-		r.Data["failed_services"] = failed
+		snap.FailedServices = failed
 		add("services", float64(len(failed)), c.Config.Health.Services)
 		completed["services"] = len(svc.Issues) == 0
 	}
@@ -221,10 +232,11 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 				b, bi, be := cpu(second)
 				if ae == nil && be == nil && b > a && bi >= ai {
 					used := 100 * (1 - (bi-ai)/(b-a))
-					r.Data["cpu_utilization_percent"] = used
-					r.Data["cpu_sample_start"] = started
-					r.Data["cpu_sample_end"] = time.Now().UTC()
-					r.Data["cpu_utilization_scope"] = "aggregate procfs CPUs"
+					snap.CPUUtilization = &used
+					snap.CPUSampleStart = &started
+					end := time.Now().UTC()
+					snap.CPUSampleEnd = &end
+					snap.CPUUtilizationScope = "aggregate procfs CPUs"
 					add("cpu", used, c.Config.Health.Usage)
 					completed["cpu"] = true
 				} else {
@@ -242,14 +254,13 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 		if !completed[name] {
 			complete = false
 			missing = append(missing, name)
-			if _, observed := checks[name]; !observed {
-				checks[name] = map[string]any{"status": "unknown"}
+			if _, observed := snap.Checks[name]; !observed {
+				snap.Checks[name] = contract.HealthCheck{Status: "unknown"}
 			}
 		}
 	}
-	r.Data["checks"] = checks
-	r.Data["severity"] = severity
-	r.Data["complete"] = complete
-	r.Data["missing_required"] = missing
-	r.Data["scope"] = "current process-visible host resources; no application or historical health claim"
+	snap.Severity = severity
+	snap.Complete = complete
+	snap.MissingRequired = missing
+	r.Data = snap
 }

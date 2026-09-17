@@ -25,8 +25,8 @@ type auditCollector struct{ payload string }
 func (auditCollector) Capabilities(context.Context) map[string]bool {
 	return map[string]bool{"read_config": true}
 }
-func (c auditCollector) Collect(context.Context, string, contract.Args) contract.Result {
-	return contract.Result{Data: map[string]any{"text": c.payload}}
+func (c auditCollector) Collect(context.Context, string, any) contract.Result {
+	return contract.Result{Data: contract.ConfigFile{Content: c.payload}}
 }
 
 func TestAuditCorrelationAndConfidentiality(t *testing.T) {

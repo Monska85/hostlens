@@ -47,6 +47,7 @@ class PreparationTests(unittest.TestCase):
             "docs/v1/OPERATIONS.md",
             "docs/v1/INSTALL.md",
             "docs/v1/VALIDATION.md",
+            "docs/v1/tools.json",
             "LICENSE",
             "NOTICE",
             "upstream/LICENSE",
@@ -55,6 +56,7 @@ class PreparationTests(unittest.TestCase):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(name)
+        (self.root / "docs/v1/tools.json").write_text("{}")
         for name, value in (("ROOT", self.root), ("OUT", self.root / "dist")):
             patch = mock.patch.object(prepare, name, value)
             patch.start()
@@ -187,6 +189,7 @@ class ChecksumTests(unittest.TestCase):
             archives = work / "dist" / "archives"
             archives.mkdir(parents=True)
             names = [f"hostlens-1.2.3-linux-{arch}.tar.gz" for arch in ("amd64", "arm64")]
+            names.append("hostlens-1.2.3-tools.json")
             for name in names:
                 (archives / name).write_bytes(b"candidate")
             valid = subprocess.check_output(["sha256sum", *names], cwd=archives, text=True)

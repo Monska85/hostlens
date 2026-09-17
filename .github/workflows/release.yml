@@ -63,6 +63,7 @@ jobs:
           subject-path: |
             dist/archives/hostlens-*-linux-amd64.tar.gz
             dist/archives/hostlens-*-linux-arm64.tar.gz
+            dist/archives/hostlens-*-tools.json
             dist/archives/checksums.txt
       - name: Upload verified archives to a draft release
         env:
@@ -83,9 +84,9 @@ jobs:
             exit 1
           fi
           cd "${GITHUB_WORKSPACE}/dist/archives"
-          sha256sum "hostlens-${version}-linux-amd64.tar.gz" "hostlens-${version}-linux-arm64.tar.gz" | sort >/tmp/hostlens-expected-checksums
+          sha256sum "hostlens-${version}-linux-amd64.tar.gz" "hostlens-${version}-linux-arm64.tar.gz" "hostlens-${version}-tools.json" | sort >/tmp/hostlens-expected-checksums
           sort checksums.txt | diff /tmp/hostlens-expected-checksums -
-          set -- "hostlens-${version}-linux-amd64.tar.gz" "hostlens-${version}-linux-arm64.tar.gz" checksums.txt
+          set -- "hostlens-${version}-linux-amd64.tar.gz" "hostlens-${version}-linux-arm64.tar.gz" "hostlens-${version}-tools.json" checksums.txt
           for asset do test -f "${asset}"; done
           case "${version}" in *-*) set -- "$@" --prerelease ;; esac
           gh release create "${RELEASE_TAG}" "$@" --verify-tag --draft --notes "${notes}"

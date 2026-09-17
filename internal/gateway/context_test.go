@@ -35,7 +35,7 @@ func TestCallPreservesContextFailure(t *testing.T) {
 					}
 					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"generation":"one"}`)), Header: make(http.Header)}, nil
 				})}}
-				result, err := c.Call(ctx, "get_os_info", contract.Args{}, "test")
+				result, err := c.Call(ctx, "get_os_info", nil, "test")
 				want, code := context.DeadlineExceeded, "timeout"
 				if cancelled {
 					want, code = context.Canceled, "cancelled"
@@ -81,7 +81,7 @@ type cancelledCollector struct{ started, cancelled chan struct{} }
 func (c cancelledCollector) Capabilities(context.Context) map[string]bool {
 	return map[string]bool{"get_os_info": true}
 }
-func (c cancelledCollector) Collect(ctx context.Context, _ string, _ contract.Args) contract.Result {
+func (c cancelledCollector) Collect(ctx context.Context, _ string, _ any) contract.Result {
 	close(c.started)
 	<-ctx.Done()
 	close(c.cancelled)

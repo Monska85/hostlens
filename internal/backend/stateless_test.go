@@ -22,10 +22,14 @@ type markerCollector struct {
 
 func (markerCollector) Capabilities(context.Context) map[string]bool { return nil }
 
-func (c markerCollector) Collect(ctx context.Context, _ string, args contract.Args) contract.Result {
+func (c markerCollector) Collect(ctx context.Context, _ string, args any) contract.Result {
+	path := ""
+	if typed, ok := args.(contract.PathArgs); ok {
+		path = typed.Path
+	}
 	result := contract.Result{
-		Data:   map[string]any{"observed": args.Path},
-		Issues: []contract.Issue{{Code: "missing_measurement", Source: args.Path, Message: args.Path}},
+		Data:   map[string]any{"observed": path},
+		Issues: []contract.Issue{{Code: "missing_measurement", Source: path, Message: path}},
 	}
 	switch c.mode {
 	case "success":
@@ -69,7 +73,11 @@ func TestDiagnosticMarkersStayOutOfRetainedBackendSurfaces(t *testing.T) {
 					cancel()
 				}()
 			}
-			result := s.Call(ctx, contract.Request{Version: 1, ID: "marker-request", Generation: "marker", Tool: "read_config", Args: contract.Args{Path: marker}})
+			rawArgs, err := json.Marshal(contract.PathArgs{Path: marker})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := s.Call(ctx, contract.Request{Version: 1, ID: "marker-request", Generation: "marker", Tool: "read_config", Args: rawArgs})
 			if mode == "timeout" || mode == "cancelled" {
 				select {
 				case <-done:

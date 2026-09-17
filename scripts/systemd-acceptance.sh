@@ -137,6 +137,11 @@ hostlens status --system >/tmp/status.json
 /opt/hostlens-smoke /tmp/token.json read_config visible
 /opt/hostlens-smoke /tmp/token.json get_inventory "${arch}"
 /opt/hostlens-smoke /tmp/token.json list_packages systemd
+# The installed candidate's discovery must match the contract snapshot that
+# shipped inside the same archive, byte for byte, and unknown arguments must
+# fail with the gateway schema rejection.
+/opt/hostlens-smoke --list /tmp/token.json /opt/hostlens-release/tools.json
+/opt/hostlens-smoke --reject /tmp/token.json get_os_info
 printf '%s\n' 'HOSTLENS_STAGE: validate service metrics and reloads'
 hostlens token create --system --name scraper --roles metrics --expires "${expiry}" >/tmp/metrics-token.json
 /opt/hostlens-smoke --metrics anonymous 401

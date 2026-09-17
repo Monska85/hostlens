@@ -131,6 +131,10 @@ jobs:
           go mod download
           make package
           (cd dist/archives && sha256sum --check --strict checksums.txt)
+          # Publish the committed tools snapshot once as a standalone asset and
+          # include it in checksums.txt next to the archives.
+          cp dist/linux-amd64/tools.json "dist/archives/hostlens-${HOSTLENS_VERSION}-tools.json"
+          (cd dist/archives && sha256sum "hostlens-${HOSTLENS_VERSION}-tools.json" >> checksums.txt)
           printf '%s\n' 'PASS: candidate ready for archive and runtime acceptance'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -138,6 +142,7 @@ jobs:
           path: |
             dist/archives/*.tar.gz
             dist/archives/*.txt
+            dist/archives/*.json
           if-no-files-found: error
           retention-days: 7
 

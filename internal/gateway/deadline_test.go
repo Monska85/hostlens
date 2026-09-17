@@ -26,7 +26,7 @@ type deadlineCollector struct {
 	delay time.Duration
 }
 
-func (c deadlineCollector) Collect(ctx context.Context, tool string, args contract.Args) contract.Result {
+func (c deadlineCollector) Collect(ctx context.Context, tool string, args any) contract.Result {
 	timer := time.NewTimer(c.delay)
 	defer timer.Stop()
 	select {
@@ -139,7 +139,7 @@ func TestReloadAppliesRequestAndResponseDeadlines(t *testing.T) {
 				if err := json.NewDecoder(response.Body).Decode(&reply); err != nil {
 					t.Fatal("grown deadline truncated the response", err)
 				}
-				if len(reply.Error) != 0 || reply.Result.IsError || reply.Result.StructuredContent.Error || reply.Result.StructuredContent.Data["observed"] != float64(0) {
+				if len(reply.Error) != 0 || reply.Result.IsError || reply.Result.StructuredContent.Error || reply.Result.StructuredContent.Data == nil {
 					t.Fatalf("grown deadline did not return observations: %+v", reply)
 				}
 			}

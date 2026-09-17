@@ -57,6 +57,8 @@ Choose expiry and overlap dates appropriate to the operation; overlap cannot ext
 | `diagnostics` | Inspect tools plus `read_config`, `query_logs`                           |
 | `metrics`     | Scrape `/metrics` only; no diagnostic or administrative authority        |
 
+A `health`-role token can also read `get_hostlens_info` when its holder has the `hostlens` audit grant (see [generic server and application audits](#generic-server-and-application-audits)).
+
 Use `Authorization: Bearer SECRET` in the MCP client. Multiple independently authenticated clients share one host policy. The gateway uses stateless SDK transport: no retained session identity can preserve revoked authority. MCP tokens never authorize local administrative commands.
 
 Start the services after reviewing policy and creating credentials:
@@ -65,6 +67,16 @@ Start the services after reviewing policy and creating credentials:
 systemctl start hostlens-diagnostics.service hostlens-gateway.service
 hostlens status --system
 ```
+
+## Client integration
+
+MCP clients discover tools with `tools/list`. Each entry carries a specific one-sentence `description`, an `inputSchema` for the arguments, and an `outputSchema` for the result's `data` member. Schemas derive from one typed Go definition per tool, and the gateway validates both directions: arguments that fail `inputSchema` return an `invalid_arguments` issue before any backend contact, and a backend result that fails `outputSchema` becomes a tool error with a `response_shape` issue instead of an unvalidated payload. Every payload also ships as a machine-readable snapshot in `docs/v1/tools.json`, included in release archives and published as a checksummed release asset, so a client can pin its parser against the exact contract of a released version.
+
+Every successful result is one envelope: `observed_at`, `host`, `source`, `issues`, `data`, `truncated`, and `next_offset`. Fatal execution failures set MCP `isError` and keep the envelope with structured `issues`; issue codes name the cause (`policy_denied`, `source_denied_or_unavailable`, `invalid_arguments`, `response_shape`, `cancelled_or_timeout` and others). Issues with valid partial observations stay successful results; a tool that can collect no evidence at all fails.
+
+Paginated tools return `next_offset` when another page exists; continue until it is absent, and treat each page as a new bounded observation rather than a retained snapshot. Audit and Docker results also report `snapshot_consistent` inside `data`; `false` means the underlying state may have changed while the page was being collected, so cross-row joins stay advisory.
+
+For a remote desktop client, expose the gateway on a loopback or private bind address with TLS enabled, or place it behind a trusted reverse proxy that terminates TLS; then create a token with the least role that covers the client's tasks and configure the client with `Authorization: Bearer SECRET`. Non-browser MCP clients send no `Origin` header, so `security.allowed_origins` does not apply to them. There is no unauthenticated endpoint: a client without a token receives HTTP 401 on `/mcp`, and version information needs an authorized call (`get_hostlens_info`) or the local `hostlens version` binary.
 
 ## Service metrics
 
@@ -321,7 +333,7 @@ Unused classification uses only the completed observation: an image or volume is
 
 ## Generic server and application audits
 
-Audit tools require a diagnostics token and explicit `audit` grants. Existing configurations activate none. Profiles can grant selected domains or `*`; every active denial wins. File and journal grants remain independent, and explicit source denials still apply to built-in observations.
+Audit tools require a diagnostics token and explicit `audit` grants. Existing configurations activate none. Profiles can grant selected domains or `*`; every active denial wins. File and journal grants remain independent, and explicit source denials still apply to built-in observations. `get_hostlens_info` is the one audit-domain tool a `health`-role token can call behind the same `hostlens` grant; every MCP endpoint still requires a valid token, and no unauthenticated endpoint exists.
 
 ```yaml
 allow:

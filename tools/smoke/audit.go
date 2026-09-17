@@ -15,6 +15,13 @@ import (
 	"github.com/Monska85/hostlens/internal/contract"
 )
 
+// dataMap returns the decoded data member. MCP structured content carries a
+// JSON object here, so every audit assertion reads members through this map.
+func dataMap(r contract.Result) map[string]any {
+	m, _ := r.Data.(map[string]any)
+	return m
+}
+
 type auditFixture struct {
 	Process string `json:"process"`
 	Port    int    `json:"port"`
@@ -71,7 +78,7 @@ func runAudit(endpoint, tokenFile, fixtureFile string) error {
 		if err != nil {
 			return err
 		}
-		rows, _ := r.Data["items"].([]any)
+		rows, _ := dataMap(r)["items"].([]any)
 		for _, row := range rows {
 			m, ok := row.(map[string]any)
 			if ok && m["name"] == fixture.Process {
@@ -95,7 +102,7 @@ func runAudit(endpoint, tokenFile, fixtureFile string) error {
 	if err != nil {
 		return err
 	}
-	process, _ := r.Data["process"].(map[string]any)
+	process, _ := dataMap(r)["process"].(map[string]any)
 	if process["name"] != fixture.Process {
 		return fmt.Errorf("process identity mismatch")
 	}
@@ -106,7 +113,7 @@ func runAudit(endpoint, tokenFile, fixtureFile string) error {
 	}
 	found := false
 	for _, key := range []string{"tcp4_listeners", "tcp6_listeners"} {
-		rows, _ := r.Data[key].([]any)
+		rows, _ := dataMap(r)[key].([]any)
 		for _, row := range rows {
 			m, ok := row.(map[string]any)
 			if ok && m["local_port"] == float64(fixture.Port) {
@@ -122,14 +129,14 @@ func runAudit(endpoint, tokenFile, fixtureFile string) error {
 	if err != nil {
 		return err
 	}
-	if r.Data["type"] != "file" {
+	if dataMap(r)["type"] != "file" {
 		return fmt.Errorf("configuration metadata missing")
 	}
 	r, err = call("read_config", map[string]any{"path": fixture.Config})
 	if err != nil {
 		return err
 	}
-	content, _ := r.Data["content"].(string)
+	content, _ := dataMap(r)["content"].(string)
 	if content == "" {
 		return fmt.Errorf("approved application configuration empty")
 	}
@@ -137,7 +144,7 @@ func runAudit(endpoint, tokenFile, fixtureFile string) error {
 	if err != nil {
 		return err
 	}
-	lines, _ := r.Data["lines"].([]any)
+	lines, _ := dataMap(r)["lines"].([]any)
 	if len(lines) == 0 {
 		return fmt.Errorf("application log evidence missing")
 	}
@@ -147,7 +154,7 @@ func runAudit(endpoint, tokenFile, fixtureFile string) error {
 		if err != nil {
 			return err
 		}
-		service, _ := r.Data["service"].(map[string]any)
+		service, _ := dataMap(r)["service"].(map[string]any)
 		if service["ActiveState"] != "active" {
 			return fmt.Errorf("application service not active")
 		}
@@ -237,7 +244,7 @@ func auditCall(ctx context.Context, endpoint, secret, tool string, args map[stri
 func checkAuditEvidence(tool string, r contract.Result) error {
 	switch tool {
 	case "list_accounts":
-		rows, _ := r.Data["items"].([]any)
+		rows, _ := dataMap(r)["items"].([]any)
 		for _, row := range rows {
 			account, _ := row.(map[string]any)
 			if account["kind"] == "account" && account["name"] == "root" && account["uid"] == float64(0) {
@@ -245,7 +252,7 @@ func checkAuditEvidence(tool string, r contract.Result) error {
 			}
 		}
 	case "get_storage_info":
-		rows, _ := r.Data["mounts"].([]any)
+		rows, _ := dataMap(r)["mounts"].([]any)
 		for _, row := range rows {
 			mount, _ := row.(map[string]any)
 			if mount["mount"] == "/" {
@@ -253,17 +260,17 @@ func checkAuditEvidence(tool string, r contract.Result) error {
 			}
 		}
 	case "get_security_info":
-		controls, _ := r.Data["kernel_controls"].(map[string]any)
+		controls, _ := dataMap(r)["kernel_controls"].(map[string]any)
 		value, ok := controls["/proc/sys/kernel/randomize_va_space"].(float64)
 		if ok && (value == 0 || value == 1 || value == 2) {
 			return nil
 		}
 	case "get_hostlens_info":
-		mode, privilege := r.Data["mode"], r.Data["privilege"]
+		mode, privilege := dataMap(r)["mode"], dataMap(r)["privilege"]
 		if (mode != "user" && mode != "system") || (privilege != "restricted" && privilege != "standard") {
 			break
 		}
-		domains, _ := r.Data["audit_domains"].(map[string]any)
+		domains, _ := dataMap(r)["audit_domains"].(map[string]any)
 		for _, domain := range []string{"processes", "network", "accounts", "storage", "security", "hostlens", "paths"} {
 			if domains[domain] != true {
 				return fmt.Errorf("expected audit domain grant missing")

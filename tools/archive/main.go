@@ -43,7 +43,7 @@ func verify(archive, dest, arch, version string) error {
 	if release.Version != version {
 		return fmt.Errorf("release version mismatch")
 	}
-	for _, name := range []string{"LICENSE", "NOTICE.txt", "config.example.yaml", "OPERATIONS.md", "INSTALL.md", "VALIDATION.md", "profiles/nginx.yaml", "profiles/allow-all.yaml", "profiles/docker-readonly.yaml", "hostlens-docker-observer"} {
+	for _, name := range []string{"LICENSE", "NOTICE.txt", "config.example.yaml", "OPERATIONS.md", "INSTALL.md", "VALIDATION.md", "tools.json", "profiles/nginx.yaml", "profiles/allow-all.yaml", "profiles/docker-readonly.yaml", "hostlens-docker-observer"} {
 		if _, ok := release.Checksums[name]; !ok {
 			return fmt.Errorf("missing release material: %s", name)
 		}

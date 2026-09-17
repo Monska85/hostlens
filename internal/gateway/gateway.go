@@ -130,7 +130,7 @@ func (c *Coordinator) sync(ctx context.Context, s backend.Snapshot) error {
 	}
 	return c.rpc(ctx, "/activate", want, &ack)
 }
-func (c *Coordinator) Call(ctx context.Context, tool string, a contract.Args, id string) (result contract.Result, err error) {
+func (c *Coordinator) Call(ctx context.Context, tool string, args json.RawMessage, id string) (result contract.Result, err error) {
 	if err := context.Cause(ctx); err != nil {
 		return backendFailure(err), err
 	}
@@ -155,7 +155,7 @@ func (c *Coordinator) Call(ctx context.Context, tool string, a contract.Args, id
 	if e := c.sync(ctx, snapshot); e != nil {
 		return backendFailure(e), e
 	}
-	req := contract.Request{Version: 1, ID: id, Generation: snapshot.Generation, Tool: tool, Args: a}
+	req := contract.Request{Version: 1, ID: id, Generation: snapshot.Generation, Tool: tool, Args: args}
 	e := c.rpc(ctx, "/call", req, &result)
 	if e != nil {
 		return backendFailure(e), e
@@ -323,21 +323,26 @@ func (c *Coordinator) MCP(ctx context.Context, identity token.Record) *mcp.Serve
 		if !contract.EffectAllowed(definition.Effect, readOnly) || !token.Allows(identity.Roles, name) || !status.Capabilities[definition.Capability] {
 			continue
 		}
-		tool := name
-		mcp.AddTool(server, &mcp.Tool{Name: tool, Description: definition.Description, InputSchema: inputSchema(definition)}, func(ctx context.Context, req *mcp.CallToolRequest, a contract.Args) (*mcp.CallToolResult, contract.Result, error) {
+		// Low-level registration: the registry's schemas are advertised as-is
+		// and both directions are validated by this package (input pre-parse,
+		// output after the backend call).
+		server.AddTool(&mcp.Tool{Name: name, Description: definition.Description, InputSchema: definition.InputSchema, OutputSchema: definition.OutputSchema}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			secret, _ := ctx.Value(secretKey{}).(string)
 			current, e := c.Tokens.Verify(secret)
-			if e != nil || current.ID != identity.ID || !token.Allows(current.Roles, tool) {
+			if e != nil || current.ID != identity.ID || !token.Allows(current.Roles, name) {
 				c.recordToolDenial()
-				return nil, contract.Result{}, errors.New("authorization denied")
+				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "authorization denied"}}}, nil
 			}
 			id := token.Random(12)
 			start := time.Now()
-			result, e := c.Call(ctx, tool, a, id)
+			result, e := c.Call(ctx, name, req.Params.Arguments, id)
 			outcome := "success"
 			if e != nil {
 				result = backendFailure(e)
 				outcome = result.Issues[0].Code
+			} else if verr := validateOutput(definition, result); verr != nil {
+				result = contract.Failure("response_shape")
+				outcome = "response_shape"
 			} else if len(result.Issues) > 0 {
 				outcome = "issues"
 			}
@@ -351,10 +356,18 @@ func (c *Coordinator) MCP(ctx context.Context, identity token.Record) *mcp.Serve
 				if outcome != "success" {
 					level = slog.LevelError
 				}
-				record := contract.AuditRecord{Component: "gateway", RequestID: id, TokenID: identity.ID, Tool: tool, Outcome: outcome, PeerIP: peer, ClientIP: client, Duration: time.Since(start)}
+				record := contract.AuditRecord{Component: "gateway", RequestID: id, TokenID: identity.ID, Tool: name, Outcome: outcome, PeerIP: peer, ClientIP: client, Duration: time.Since(start)}
 				c.Log.Log(ctx, level, "tool_call", record.Attributes()...)
 			}
-			return &mcp.CallToolResult{IsError: result.Error}, result, nil
+			payload, err := json.Marshal(result)
+			if err != nil {
+				return nil, err
+			}
+			return &mcp.CallToolResult{
+				IsError:           result.Error,
+				StructuredContent: json.RawMessage(payload),
+				Content:           []mcp.Content{&mcp.TextContent{Text: string(payload)}},
+			}, nil
 		})
 	}
 	return server

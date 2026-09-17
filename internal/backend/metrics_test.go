@@ -19,7 +19,7 @@ type metricsStalledCollector struct{ entered, release chan struct{} }
 func (c metricsStalledCollector) Capabilities(context.Context) map[string]bool {
 	panic("telemetry must not discover capabilities")
 }
-func (c metricsStalledCollector) Collect(context.Context, string, contract.Args) contract.Result {
+func (c metricsStalledCollector) Collect(context.Context, string, any) contract.Result {
 	close(c.entered)
 	<-c.release
 	return contract.Result{}

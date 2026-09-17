@@ -68,22 +68,22 @@ func TestGetHealthSnapshotCoversCpu(t *testing.T) {
 	c := collectorWith(t, nil, nil, nil)
 	c.Config.Health.Sample = 10 * time.Millisecond
 	c.Config.Health.Required = []string{"cpu"}
-	result := c.Collect(context.Background(), "get_health_snapshot", contract.Args{})
+	result := c.Collect(context.Background(), "get_health_snapshot", contract.NoArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	checks, ok := result.Data["checks"].(map[string]any)
+	snap, ok := result.Data.(contract.HealthSnapshot)
 	if !ok {
 		t.Fatalf("checks lost: %v", result.Data)
 	}
-	cpuCheck, ok := checks["cpu"].(map[string]any)
+	cpuCheck, ok := snap.Checks["cpu"]
 	if !ok {
-		t.Fatalf("cpu check missing: %v", checks)
+		t.Fatalf("cpu check missing: %v", snap.Checks)
 	}
-	if cpuCheck["status"] != "OK" && cpuCheck["status"] != "warning" && cpuCheck["status"] != "critical" {
+	if cpuCheck.Status != "OK" && cpuCheck.Status != "warning" && cpuCheck.Status != "critical" {
 		t.Fatalf("cpu status invalid: %v", cpuCheck)
 	}
-	if _, ok := result.Data["cpu_utilization_percent"].(float64); !ok {
-		t.Fatalf("cpu utilization missing: %v", result.Data["cpu_utilization_percent"])
+	if snap.CPUUtilization == nil {
+		t.Fatalf("cpu utilization missing: %v", snap.CPUUtilization)
 	}
 }

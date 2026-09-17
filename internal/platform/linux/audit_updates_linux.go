@@ -13,10 +13,11 @@ import (
 	"github.com/Monska85/hostlens/internal/contract"
 )
 
-func (c *Collector) auditUpdates(ctx context.Context, r *contract.Result) {
+func (c *Collector) auditUpdates(ctx context.Context, r *contract.Result) bool {
+	p := r.Data.(*contract.UpdateInfo)
 	r.Source = "local package metadata"
-	r.Data["scope"] = "cached repository metadata only; no refresh, upgrade or vulnerability assessment"
-	metadata := []map[string]any{}
+	p.Scope = "cached repository metadata only; no refresh, upgrade or vulnerability assessment"
+	metadata := []contract.RepoMetadata{}
 
 	for _, dir := range []string{"/var/lib/apt/lists", "/var/lib/pacman/sync"} {
 		if !c.auditSystemContinue(ctx, r, dir) {
@@ -64,7 +65,7 @@ func (c *Collector) auditUpdates(ctx context.Context, r *contract.Result) {
 				auditIssue(r, "collection_failed", source, "metadata timestamp unavailable")
 				continue
 			}
-			row := map[string]any{"source": source, "modified_at": st.ModTime().UTC(), "age_seconds": r.ObservedAt.Sub(st.ModTime()).Seconds()}
+			row := contract.RepoMetadata{Source: source, ModifiedAt: st.ModTime().UTC(), AgeSeconds: r.ObservedAt.Sub(st.ModTime()).Seconds()}
 			if apt {
 				b, err := c.readAuditBounded(f)
 				f.Close()
@@ -84,16 +85,19 @@ func (c *Collector) auditUpdates(ctx context.Context, r *contract.Result) {
 						continue
 					}
 					if key == "Date" {
-						row["published_at"] = date.UTC()
+						published := date.UTC()
+						row.PublishedAt = &published
 					} else {
-						row["valid_until"] = date.UTC()
-						row["expired"] = r.ObservedAt.After(date)
+						until := date.UTC()
+						row.ValidUntil = &until
+						expired := r.ObservedAt.After(date)
+						row.Expired = &expired
 					}
 				}
-				if row["published_at"] == nil {
+				if row.PublishedAt == nil {
 					auditIssue(r, "malformed_source", source, "repository metadata lacks publication date")
 				}
-				if expired, _ := row["expired"].(bool); expired {
+				if row.Expired != nil && *row.Expired {
 					auditIssue(r, "stale_metadata", source, "cached repository metadata has expired")
 				}
 			} else {
@@ -105,10 +109,11 @@ func (c *Collector) auditUpdates(ctx context.Context, r *contract.Result) {
 			metadata = append(metadata, row)
 		}
 	}
-	r.Data["repository_metadata"] = metadata
+	p.RepositoryMetadata = metadata
 	if len(metadata) == 0 {
 		r.Error = true
 		auditIssue(r, "source_unavailable", "updates", "no supported local repository metadata was observed")
 	}
 	auditIssue(r, "evidence_unavailable", "updates", "cache timestamps do not prove successful refresh or signature verification; upgrade candidates, enabled repository configuration and reboot requirements are not established")
+	return true
 }

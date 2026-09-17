@@ -25,7 +25,7 @@ func TestReleaseMaterials(t *testing.T) {
 			gz := gzip.NewWriter(f)
 			tw := tar.NewWriter(gz)
 			release := lifecycle.Release{Schema: 1, Version: "1.2.3", Architecture: "arm64", Checksums: map[string]string{}}
-			for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer", "LICENSE", "NOTICE.txt", "config.example.yaml", "OPERATIONS.md", "INSTALL.md", "VALIDATION.md", "profiles/nginx.yaml", "profiles/allow-all.yaml", "profiles/docker-readonly.yaml", "licenses/dependency_LICENSE", "release.json"} {
+			for _, name := range []string{"hostlens", "hostlens-diagnostics", "hostlens-docker-observer", "LICENSE", "NOTICE.txt", "config.example.yaml", "OPERATIONS.md", "INSTALL.md", "VALIDATION.md", "tools.json", "profiles/nginx.yaml", "profiles/allow-all.yaml", "profiles/docker-readonly.yaml", "licenses/dependency_LICENSE", "release.json"} {
 				if name == missing {
 					continue
 				}

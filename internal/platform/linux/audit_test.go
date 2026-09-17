@@ -27,6 +27,35 @@ func auditFixture(t *testing.T) (*Collector, string) {
 	return c, root
 }
 
+// auditCoverageOf reads the coverage declaration of whichever typed audit
+// payload the result carries. An unknown payload reports complete so coverage
+// assertions fail loudly on the wrong type.
+func auditCoverageOf(r contract.Result) bool {
+	switch p := r.Data.(type) {
+	case *contract.ProcessPage:
+		return p.CoverageComplete
+	case *contract.ProcessInfo:
+		return p.CoverageComplete
+	case *contract.NetworkInfo:
+		return p.CoverageComplete
+	case *contract.AccountPage:
+		return p.CoverageComplete
+	case *contract.StorageInfo:
+		return p.CoverageComplete
+	case *contract.UpdateInfo:
+		return p.CoverageComplete
+	case *contract.SecurityInfo:
+		return p.CoverageComplete
+	case *contract.HostlensInfo:
+		return p.CoverageComplete
+	case *contract.ServiceInspection:
+		return p.CoverageComplete
+	case *contract.PathInspection:
+		return p.CoverageComplete
+	}
+	return true
+}
+
 func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 	t.Parallel()
 
@@ -35,7 +64,7 @@ func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 		if contract.AuditDomain(tool) == "" {
 			continue
 		}
-		r := c.Collect(context.Background(), tool, contract.Args{})
+		r := c.Collect(context.Background(), tool, contract.NoArgs{})
 		if !r.Error || len(r.Issues) != 1 || r.Issues[0].Code != "policy_denied" {
 			t.Fatalf("%s: %+v", tool, r)
 		}
@@ -43,9 +72,10 @@ func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 	c, _ = auditFixture(t)
 	for _, tc := range []struct {
 		tool string
-		args contract.Args
+		args any
 	}{
-		{"get_process_info", contract.Args{PID: -1}}, {"inspect_service", contract.Args{Unit: "--all"}}, {"inspect_path", contract.Args{Path: "/etc/../shadow"}}, {"get_hostlens_info", contract.Args{Path: "/etc/shadow"}}, {"list_processes", contract.Args{Offset: -1}},
+		{"get_process_info", contract.PIDArgs{PID: -1}}, {"inspect_service", contract.UnitArgs{Unit: "--all"}}, {"inspect_path", contract.PathArgs{Path: "/etc/../shadow"}}, {"get_hostlens_info", contract.PathArgs{Path: "/etc/shadow"}}, {"list_processes", contract.PageArgs{Offset: -1}},
+		{"get_network_info", contract.PathArgs{Path: "/etc"}}, {"get_storage_info", contract.PathArgs{Path: "/etc"}}, {"get_update_info", contract.PathArgs{Path: "/etc"}}, {"get_security_info", contract.PathArgs{Path: "/etc"}},
 	} {
 		r := c.Collect(context.Background(), tc.tool, tc.args)
 		if !r.Error || r.Issues[0].Code != "invalid_arguments" {
@@ -54,9 +84,12 @@ func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 	}
 	// Pagination bounds are validated before any collection runs.
 	for _, tool := range []string{"list_processes", "list_accounts"} {
-		r := c.Collect(context.Background(), tool, contract.Args{Limit: c.Config.Limits.PageSize + 1})
-		if !r.Error || r.Data["coverage_complete"] != false || len(r.Issues) != 1 || r.Issues[0].Code != "invalid_arguments" {
+		r := c.Collect(context.Background(), tool, contract.PageArgs{Limit: c.Config.Limits.PageSize + 1})
+		if !r.Error || len(r.Issues) != 1 || r.Issues[0].Code != "invalid_arguments" {
 			t.Fatalf("invalid bounds reached collection: %+v", r)
+		}
+		if auditCoverageOf(r) {
+			t.Fatalf("%s: invalid bounds kept coverage complete: %+v", tool, r)
 		}
 	}
 	// Undenied native storage dependencies stay verbatim; filtering must not
@@ -64,7 +97,7 @@ func TestAuditRequiresExplicitDomainAndValidSelectors(t *testing.T) {
 	c.Runner = auditRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("Id=example.service\nLoadState=loaded\nRequires=dev-sda.device dev-sda2.swap -.mount\n"), nil
 	})
-	r := c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "example.service"})
+	r := c.Collect(context.Background(), "inspect_service", contract.UnitArgs{Unit: "example.service"})
 	b, _ := json.Marshal(r)
 	if r.Error || !strings.Contains(string(b), "dev-sda.device dev-sda2.swap -.mount") {
 		t.Fatalf("native dependencies lost: %+v", r)
@@ -86,7 +119,7 @@ func TestAuditPathMetadataRespectsObjectsAndAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{"/etc/public", "/etc", "/etc/link", "/etc/protected"} {
-		r := c.Collect(context.Background(), "inspect_path", contract.Args{Path: path})
+		r := c.Collect(context.Background(), "inspect_path", contract.PathArgs{Path: path})
 		want := path == "/etc/public" || path == "/etc"
 		if r.Error == want {
 			t.Fatalf("%s: %+v", path, r)
@@ -97,7 +130,7 @@ func TestAuditPathMetadataRespectsObjectsAndAliases(t *testing.T) {
 		}
 	}
 	fixtureOK(t, os.Link(filepath.Join(root, "etc/protected"), filepath.Join(root, "etc/alias")))
-	r := c.Collect(context.Background(), "inspect_path", contract.Args{Path: "/etc/alias"})
+	r := c.Collect(context.Background(), "inspect_path", contract.PathArgs{Path: "/etc/alias"})
 	if !r.Error {
 		t.Fatal("hardlinked protected metadata exposed", r)
 	}
@@ -109,9 +142,10 @@ func TestHostlensAuditDoesNotReturnSecretConfiguration(t *testing.T) {
 	c, _ := auditFixture(t)
 	c.Config.Server.TLS.KeyFile = "/never-expose-key-location"
 	c.Config.TokenStore = "/never-expose-token-location"
-	r := c.Collect(context.Background(), "get_hostlens_info", contract.Args{})
+	r := c.Collect(context.Background(), "get_hostlens_info", contract.NoArgs{})
 	b, err := json.Marshal(r)
-	if err != nil || r.Error || strings.Contains(string(b), "never-expose") || r.Data["privilege"] != c.Config.Privilege {
+	info, ok := r.Data.(*contract.HostlensInfo)
+	if err != nil || r.Error || !ok || strings.Contains(string(b), "never-expose") || info.Privilege != c.Config.Privilege {
 		t.Fatalf("unsafe self inspection: %+v %v", r, err)
 	}
 }
@@ -132,14 +166,14 @@ func TestServiceAuditSelectsSafeProperties(t *testing.T) {
 		}
 		return []byte("Id=example.service\nLoadState=loaded\nMainPID=42\nNoNewPrivileges=yes\nEnvironment=PASSWORD=secret\nExecStart=secret\n"), nil
 	})
-	r := c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "example.service"})
+	r := c.Collect(context.Background(), "inspect_service", contract.UnitArgs{Unit: "example.service"})
 	b, _ := json.Marshal(r)
 	if r.Error || strings.Contains(string(b), "secret") {
 		t.Fatalf("unsafe service result: %+v", r)
 	}
 	c.Config.Deny = config.Rules{Journal: []string{"example.service"}}
 	c.Policy, _ = policy.CompileLinux(c.Config, "/etc/hostlens/config.yaml", nil)
-	r = c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "example.service"})
+	r = c.Collect(context.Background(), "inspect_service", contract.UnitArgs{Unit: "example.service"})
 	if !r.Error || r.Issues[0].Code != "policy_denied" {
 		t.Fatal(r)
 	}
@@ -154,8 +188,8 @@ func TestServiceAuditRejectsDeniedCanonicalAlias(t *testing.T) {
 	c.Runner = auditRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("Id=ssh.service\nLoadState=loaded\nMainPID=42\n"), nil
 	})
-	r := c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "sshd.service"})
-	if !r.Error || r.Data["service"] != nil || r.Issues[0].Code != "policy_denied" {
+	r := c.Collect(context.Background(), "inspect_service", contract.UnitArgs{Unit: "sshd.service"})
+	if !r.Error || len(r.Data.(*contract.ServiceInspection).Service) != 0 || r.Issues[0].Code != "policy_denied" {
 		t.Fatalf("canonical denial bypassed: %+v", r)
 	}
 }
@@ -166,8 +200,8 @@ func TestAuditRootMetadataExactGrant(t *testing.T) {
 	c, _ := auditFixture(t)
 	c.Config.Allow.Files = []string{"/"}
 	c.Policy, _ = policy.CompileLinux(c.Config, "/configuration.yaml", nil)
-	r := c.Collect(context.Background(), "inspect_path", contract.Args{Path: "/"})
-	if r.Error || r.Data["type"] != "directory" {
+	r := c.Collect(context.Background(), "inspect_path", contract.PathArgs{Path: "/"})
+	if r.Error || r.Data.(*contract.PathInspection).Type != "directory" {
 		t.Fatalf("exact root grant rejected: %+v", r)
 	}
 }
@@ -190,9 +224,28 @@ func TestServiceAuditFiltersDeniedDependencies(t *testing.T) {
 	c.Runner = auditRunnerFunc(func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("Id=example.service\nLoadState=loaded\nRequires=secret.service -.mount allowed.service\n"), nil
 	})
-	r := c.Collect(context.Background(), "inspect_service", contract.Args{Unit: "example.service"})
+	r := c.Collect(context.Background(), "inspect_service", contract.UnitArgs{Unit: "example.service"})
 	b, _ := json.Marshal(r)
 	if r.Error || strings.Contains(string(b), "secret.service") || strings.Contains(string(b), "-.mount") || !strings.Contains(string(b), "allowed.service") {
 		t.Fatalf("dependency denial failed: %+v", r)
+	}
+}
+
+// The typed evidence check replaces the legacy map-key scan: a result whose
+// payload carries only the scope and coverage declarations, plus issues, is an
+// error, while the same issues alongside collected evidence stay a success.
+func TestAuditEvidenceCheckRejectsScopeOnlyResults(t *testing.T) {
+	t.Parallel()
+
+	c, _ := auditFixture(t)
+	r := c.Collect(context.Background(), "get_process_info", contract.PIDArgs{PID: 42})
+	if !r.Error || len(r.Issues) == 0 || auditCoverageOf(r) {
+		t.Fatalf("scope-only audit result passed as success: %+v", r)
+	}
+	writeAuditFixture(t, c, "/proc/42/stat", processFixtureStat(42, "worker"))
+	r = c.Collect(context.Background(), "get_process_info", contract.PIDArgs{PID: 42})
+	info, ok := r.Data.(*contract.ProcessInfo)
+	if r.Error || !ok || info.Process == nil {
+		t.Fatalf("evidenced audit result rejected: %+v", r)
 	}
 }

@@ -26,7 +26,7 @@ func (c *stalledDiscovery) Capabilities(context.Context) map[string]bool {
 	<-c.release
 	return map[string]bool{"get_os_info": true}
 }
-func (c *stalledDiscovery) Collect(context.Context, string, contract.Args) contract.Result {
+func (c *stalledDiscovery) Collect(context.Context, string, any) contract.Result {
 	return contract.Result{}
 }
 

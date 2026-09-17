@@ -90,6 +90,24 @@ func engineResponse(t *testing.T) *dockerobs.EngineInfo {
 	}
 }
 
+// dockerInfoOf returns the typed engine payload of a get_docker_info result.
+func dockerInfoOf(r contract.Result) *dockerobs.EngineInfoPayload {
+	info, ok := r.Data.(*dockerobs.EngineInfoPayload)
+	if !ok {
+		panic(fmt.Sprintf("get_docker_info carried %T", r.Data))
+	}
+	return info
+}
+
+// dockerPageOf returns the typed page payload of a paginated Docker result.
+func dockerPageOf[T any](r contract.Result) *dockerobs.Page[T] {
+	page, ok := r.Data.(*dockerobs.Page[T])
+	if !ok {
+		panic(fmt.Sprintf("docker page carried %T", r.Data))
+	}
+	return page
+}
+
 func TestDockerInfoAvailableAndUnsupportedModes(t *testing.T) {
 	t.Parallel()
 
@@ -97,11 +115,12 @@ func TestDockerInfoAvailableAndUnsupportedModes(t *testing.T) {
 	c := collectorWith(t, []string{"daemon"}, nil, &fakeObserver{responses: map[string]dockerobs.Response{
 		dockerobs.OpEngineInfo: {Engine: &info},
 	}})
-	result := c.Collect(context.Background(), "get_docker_info", contract.Args{})
+	result := c.Collect(context.Background(), "get_docker_info", contract.NoArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	if result.Data["available"] != true || result.Data["server_version"] != "28.0.0" {
+	payload := dockerInfoOf(result)
+	if !payload.Available || payload.ServerVersion != "28.0.0" {
 		t.Fatal(result.Data)
 	}
 	for _, banned := range []string{"registry", "proxy", "plugin"} {
@@ -113,8 +132,8 @@ func TestDockerInfoAvailableAndUnsupportedModes(t *testing.T) {
 	c = collectorWith(t, []string{"daemon"}, nil, &fakeObserver{responses: map[string]dockerobs.Response{
 		dockerobs.OpEngineInfo: {Engine: &rootless},
 	}})
-	result = c.Collect(context.Background(), "get_docker_info", contract.Args{})
-	if !result.Error || result.Data["available"] != false {
+	result = c.Collect(context.Background(), "get_docker_info", contract.NoArgs{})
+	if !result.Error || dockerInfoOf(result).Available {
 		t.Fatal("rootless engine must stay explicitly unsupported")
 	}
 }
@@ -128,12 +147,12 @@ func TestDockerDisabledAndUnavailable(t *testing.T) {
 		t.Fatal(e)
 	}
 	c := &Collector{Config: cfg, Policy: p}
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if result.Issues[0].Code != "docker_disabled" {
 		t.Fatal(result)
 	}
 	c = collectorWith(t, []string{"containers"}, nil, &fakeObserver{err: errors.New("observer down")})
-	result = c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result = c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if !result.Error || result.Issues[0].Code != "docker_unavailable" {
 		t.Fatal(result)
 	}
@@ -154,11 +173,11 @@ func TestDockerDefaultPageFitsTheResponseBudget(t *testing.T) {
 	}
 	observer := &fakeObserver{containers: func() []dockerobs.ContainerSummary { return items }}
 	c := collectorWith(t, []string{"containers"}, nil, observer)
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if result.Error {
 		t.Fatalf("default page failed: %v", result.Issues)
 	}
-	page := result.Data["items"].([]map[string]any)
+	page := dockerPageOf[dockerobs.ContainerPayload](result).Items
 	b := mustJSONBytes(result)
 	if len(page) == 0 || len(page) >= 300 {
 		t.Fatalf("unexpected page size %d", len(page))
@@ -171,7 +190,7 @@ func TestDockerDefaultPageFitsTheResponseBudget(t *testing.T) {
 	}
 	// An explicit over-budget limit clamps with a continuation instead of a
 	// wholesale response_limit failure.
-	result = c.Collect(context.Background(), "list_docker_containers", contract.Args{Limit: c.Config.Limits.PageSize})
+	result = c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{Limit: c.Config.Limits.PageSize})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
@@ -194,7 +213,7 @@ func TestDockerUngrantedCallsNeverReachTheObserver(t *testing.T) {
 			dockerobs.OpEngineInfo: {Engine: &dockerobs.EngineInfo{ServerVersion: "28.0.0", NegotiatedAPI: "1.51", MinAPI: "1.44"}},
 		}}
 		c := collectorWith(t, nil, nil, observer)
-		result := c.Collect(context.Background(), tool, contract.Args{Container: "web"})
+		result := c.Collect(context.Background(), tool, contract.ContainerArgs{Container: "web"})
 		if len(observer.requests) != 0 {
 			t.Fatalf("%s contacted the observer without any grant: %+v", tool, observer.requests)
 		}
@@ -218,7 +237,7 @@ func TestDockerUngrantedCallsNeverReachTheObserver(t *testing.T) {
 		if tc.deny[0] == "containers" {
 			tool = "list_docker_containers"
 		}
-		result := c.Collect(context.Background(), tool, contract.Args{})
+		result := c.Collect(context.Background(), tool, contract.NoArgs{})
 		if len(observer.requests) != 0 {
 			t.Fatalf("denied %s contacted the observer", tc.deny[0])
 		}
@@ -244,15 +263,16 @@ func TestDockerDiskUsageFiltersDeniedContainers(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"disk_usage"}, []string{"container/db"}, observer)
-	result := c.Collect(context.Background(), "get_docker_disk_usage", contract.Args{})
+	result := c.Collect(context.Background(), "get_docker_disk_usage", contract.NoArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	if rows := result.Data["containers"].([]map[string]any); len(rows) != 0 {
-		t.Fatalf("denied container inventory row leaked: %v", rows)
+	usage := diskUsageOf(result)
+	if len(usage.Containers) != 0 {
+		t.Fatalf("denied container inventory row leaked: %v", usage.Containers)
 	}
-	if stopped := result.Data["reclaimable"].(map[string]any)["stopped_container_ids"]; stopped != nil {
-		t.Fatalf("denied stopped container leaked: %v", stopped)
+	if len(usage.Reclaimable.StoppedContainerIDs) != 0 {
+		t.Fatalf("denied stopped container leaked: %v", usage.Reclaimable.StoppedContainerIDs)
 	}
 }
 
@@ -269,21 +289,21 @@ func TestDockerImageTagAndNetworkNameDenialsApply(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"images"}, []string{"image/secretimg:1"}, observer)
-	result := c.Collect(context.Background(), "list_docker_images", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_images", contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	if items := result.Data["items"].([]map[string]any); len(items) != 0 {
+	if items := dockerPageOf[dockerobs.ImagePayload](result).Items; len(items) != 0 {
 		t.Fatalf("tag-denied image listed: %v", items)
 	}
 	network := dockerobs.NetworkSummary{ID: id64For(7), Name: "secret-net"}
 	observer.responses[dockerobs.OpNetworkList] = dockerobs.Response{Networks: []dockerobs.NetworkSummary{network}}
 	c = collectorWith(t, []string{"networks"}, []string{"network/secret-net*"}, observer)
-	result = c.Collect(context.Background(), "list_docker_networks", contract.Args{})
+	result = c.Collect(context.Background(), "list_docker_networks", contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	if items := result.Data["items"].([]map[string]any); len(items) != 0 {
+	if items := dockerPageOf[dockerobs.NetworkPayload](result).Items; len(items) != 0 {
 		t.Fatalf("name-denied network listed: %v", items)
 	}
 }
@@ -299,14 +319,14 @@ func TestContainerListFiltersDeniedAndPages(t *testing.T) {
 		}
 	}}
 	c := collectorWith(t, []string{"containers"}, []string{"container/cache"}, observer)
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	items := result.Data["items"].([]map[string]any)
+	items := dockerPageOf[dockerobs.ContainerPayload](result).Items
 	visible := map[string]bool{}
 	for _, item := range items {
-		visible[item["id"].(string)] = true
+		visible[item.ID] = true
 	}
 	if len(items) != 2 || !visible[runningID] || !visible[stoppedID] || visible[unhealthyID] {
 		t.Fatalf("denied container not filtered: %v", result.Data)
@@ -316,7 +336,7 @@ func TestContainerListFiltersDeniedAndPages(t *testing.T) {
 		t.Fatal("filtered coverage must be reported")
 	}
 	// Inventory without item grant lists metadata but item calls are denied.
-	result = c.Collect(context.Background(), "get_docker_container", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "get_docker_container", contract.ContainerArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "policy_denied" {
 		t.Fatalf("item observation without grant: %v", result)
 	}
@@ -335,11 +355,11 @@ func TestDockerContainerDetailAndNameReuse(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"container/*"}, nil, observer)
-	result := c.Collect(context.Background(), "get_docker_container", contract.Args{Container: "web"})
+	result := c.Collect(context.Background(), "get_docker_container", contract.ContainerArgs{Container: "web"})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	if result.Data["id"] != runningID {
+	if detail := result.Data.(*dockerobs.ContainerDetailPayload); detail.ID != runningID {
 		t.Fatal(result.Data)
 	}
 	// Name reuse: the selector resolves to a different identity after the
@@ -347,7 +367,7 @@ func TestDockerContainerDetailAndNameReuse(t *testing.T) {
 	observer.containers = func() []dockerobs.ContainerSummary {
 		return []dockerobs.ContainerSummary{summary(removedID, "web", "running")}
 	}
-	result = c.Collect(context.Background(), "get_docker_container", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "get_docker_container", contract.ContainerArgs{Container: "web"})
 	if !result.Error || result.Issues[len(result.Issues)-1].Code != "identity_changed" {
 		t.Fatalf("name reuse released evidence: %v", result.Issues)
 	}
@@ -358,7 +378,7 @@ func TestDockerContainerDetailAndNameReuse(t *testing.T) {
 	observer.containers = func() []dockerobs.ContainerSummary {
 		return []dockerobs.ContainerSummary{first, second}
 	}
-	result = c.Collect(context.Background(), "get_docker_container", contract.Args{Container: prefix})
+	result = c.Collect(context.Background(), "get_docker_container", contract.ContainerArgs{Container: prefix})
 	if !result.Error || result.Issues[0].Code != "ambiguous_selector" {
 		t.Fatalf("ambiguous prefix resolved: %v", result.Issues)
 	}
@@ -377,11 +397,12 @@ func TestDockerStatsHonestUnavailableFields(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"stats/*"}, nil, observer)
-	result := c.Collect(context.Background(), "get_docker_container_stats", contract.Args{Container: "web"})
+	result := c.Collect(context.Background(), "get_docker_container_stats", contract.ContainerArgs{Container: "web"})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	if result.Data["cpu_percent"] != 12.5 {
+	statsPayload := result.Data.(*dockerobs.ContainerStatsPayload)
+	if statsPayload.CPUPercent == nil || *statsPayload.CPUPercent != 12.5 {
 		t.Fatal(result.Data)
 	}
 	// Stopped container: stats evidence exists but is explicitly not live.
@@ -389,7 +410,7 @@ func TestDockerStatsHonestUnavailableFields(t *testing.T) {
 		return []dockerobs.ContainerSummary{summary(stoppedID, "db", "exited")}
 	}
 	observer.responses[dockerobs.OpContainerStats] = dockerobs.Response{Stats: &dockerobs.ContainerStats{Read: time.Now().UTC()}}
-	result = c.Collect(context.Background(), "get_docker_container_stats", contract.Args{Container: "db"})
+	result = c.Collect(context.Background(), "get_docker_container_stats", contract.ContainerArgs{Container: "db"})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
@@ -421,30 +442,30 @@ func TestUnusedAnalysisRespectsStoppedReferences(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"images", "volumes"}, nil, observer)
-	result := c.Collect(context.Background(), "list_docker_images", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_images", contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	items := result.Data["items"].([]map[string]any)
-	if items[0]["currently_unused"] == true {
+	images := dockerPageOf[dockerobs.ImagePayload](result).Items
+	if images[0].CurrentlyUnused {
 		t.Fatal("stopped container reference must prevent unused classification")
 	}
-	if items[0]["container_references"] != 1 {
-		t.Fatalf("reference count missing: %v", items[0])
+	if images[0].ContainerReference == nil || *images[0].ContainerReference != 1 {
+		t.Fatalf("reference count missing: %v", images[0])
 	}
-	result = c.Collect(context.Background(), "list_docker_volumes", contract.Args{})
-	items = result.Data["items"].([]map[string]any)
-	if items[0]["currently_unused"] == true {
+	result = c.Collect(context.Background(), "list_docker_volumes", contract.PageArgs{})
+	volumes := dockerPageOf[dockerobs.VolumePayload](result).Items
+	if volumes[0].CurrentlyUnused {
 		t.Fatal("referenced volume must not be unused")
 	}
 	// With no referencing containers, the same inventory is unused.
 	observer.containers = func() []dockerobs.ContainerSummary { return nil }
-	result = c.Collect(context.Background(), "list_docker_images", contract.Args{})
-	items = result.Data["items"].([]map[string]any)
-	if items[0]["currently_unused"] != true {
+	result = c.Collect(context.Background(), "list_docker_images", contract.PageArgs{})
+	images = dockerPageOf[dockerobs.ImagePayload](result).Items
+	if !images[0].CurrentlyUnused {
 		t.Fatal("unreferenced image must be classified unused at observation time")
 	}
-	if _, ok := result.Data["unused_since"]; ok {
+	if strings.Contains(mustJSON(t, result), "unused_since") {
 		t.Fatal("creation time must never become unused duration")
 	}
 	// The daemon's dangling fact must stay visible next to the unused fact.
@@ -455,9 +476,9 @@ func TestUnusedAnalysisRespectsStoppedReferences(t *testing.T) {
 		},
 	}
 	c = collectorWith(t, []string{"images"}, nil, observer)
-	result = c.Collect(context.Background(), "list_docker_images", contract.Args{})
-	items = result.Data["items"].([]map[string]any)
-	if items[0]["dangling"] != true || items[0]["currently_unused"] != true {
+	result = c.Collect(context.Background(), "list_docker_images", contract.PageArgs{})
+	images = dockerPageOf[dockerobs.ImagePayload](result).Items
+	if !images[0].Dangling || !images[0].CurrentlyUnused {
 		t.Fatal("dangling and unused facts must both be visible")
 	}
 }
@@ -479,12 +500,12 @@ func TestRaceSuppressesUnusedCertainty(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"images"}, nil, observer)
-	result := c.Collect(context.Background(), "list_docker_images", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_images", contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	items := result.Data["items"].([]map[string]any)
-	if items[0]["currently_unused"] == true {
+	images := dockerPageOf[dockerobs.ImagePayload](result).Items
+	if images[0].CurrentlyUnused {
 		t.Fatal("unstable observation must not classify certainty")
 	}
 	found := false
@@ -514,15 +535,15 @@ func TestDiskUsageReclaimableAdvisory(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"disk_usage", "images", "volumes"}, nil, observer)
-	result := c.Collect(context.Background(), "get_docker_disk_usage", contract.Args{})
+	result := c.Collect(context.Background(), "get_docker_disk_usage", contract.NoArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	reclaimable := result.Data["reclaimable"].(map[string]any)
-	if reclaimable["observation_stable"] != true {
+	usage := diskUsageOf(result)
+	if !usage.Reclaimable.ObservationStable {
 		t.Fatal("stable observation expected")
 	}
-	ids := reclaimable["unused_image_ids"].([]string)
+	ids := usage.Reclaimable.UnusedImageIDs
 	if len(ids) != 1 || ids[0] != "sha256:"+imageID(9) {
 		t.Fatalf("reclaimable candidates wrong: %v", ids)
 	}
@@ -537,14 +558,24 @@ func TestDiskUsageReclaimableAdvisory(t *testing.T) {
 			return nil
 		}
 	}
-	result = c.Collect(context.Background(), "get_docker_disk_usage", contract.Args{})
+	result = c.Collect(context.Background(), "get_docker_disk_usage", contract.NoArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	reclaimable = result.Data["reclaimable"].(map[string]any)
-	if reclaimable["observation_stable"] != false {
+	usage = diskUsageOf(result)
+	if usage.Reclaimable.ObservationStable {
 		t.Fatal("unstable accounting must report non-atomic coverage")
 	}
+}
+
+// diskUsageOf returns the typed disk-usage payload of a get_docker_disk_usage
+// result.
+func diskUsageOf(r contract.Result) *dockerobs.DiskUsagePayload {
+	usage, ok := r.Data.(*dockerobs.DiskUsagePayload)
+	if !ok {
+		panic(fmt.Sprintf("disk usage carried %T", r.Data))
+	}
+	return usage
 }
 
 func TestDockerLogsBoundedAndDriverGap(t *testing.T) {
@@ -560,11 +591,12 @@ func TestDockerLogsBoundedAndDriverGap(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"logs/*"}, nil, observer)
-	result := c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web", Limit: 10})
+	result := c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web", Limit: 10})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	entries := result.Data["entries"].([]dockerobs.LogRecord)
+	logPage := result.Data.(*dockerobs.DockerLogPage)
+	entries := logPage.LogPagePayload.Entries
 	if len(entries) != 1 || entries[0].Message != "line" {
 		t.Fatal("records lost")
 	}
@@ -573,7 +605,7 @@ func TestDockerLogsBoundedAndDriverGap(t *testing.T) {
 	}
 	// Unsupported driver: an interface gap, not an empty log claim.
 	observer.responses[dockerobs.OpContainerLogs] = dockerobs.Response{Failed: true, Reason: "engine operation unsupported by this daemon: driver does not support reading", Issue: "unsupported_driver"}
-	result = c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	if !result.Error {
 		t.Fatal(result)
 	}
@@ -594,14 +626,20 @@ func TestDockerMutationShapedArgumentsRejected(t *testing.T) {
 	observer := &fakeObserver{}
 	c := collectorWith(t, []string{"*"}, nil, observer)
 	before := len(observer.requests)
-	for _, args := range []contract.Args{
-		{Container: "web", Format: "jsonl"},
-		{Container: "web", RawTail: true},
-		{Container: "web", Priority: intPtr(3)},
+	// Format, raw-tail, and priority members no longer exist on the typed
+	// container-log arguments; the gateway schema rejects them. Wrong-typed
+	// argument structs and out-of-ceiling limits stay rejected here.
+	for _, tc := range []struct {
+		args any
+		code string
+	}{
+		{contract.ContainerArgs{}, "invalid_arguments"},
+		{contract.PageArgs{Limit: 1}, "invalid_arguments"},
+		{contract.DockerLogsArgs{Container: "web", Limit: c.Config.Limits.LogEntries + 1}, "invalid_bounds"},
 	} {
-		result := c.Collect(context.Background(), "query_docker_logs", args)
-		if !result.Error || result.Issues[0].Code != "invalid_bounds" {
-			t.Fatalf("mutation-shaped argument accepted: %+v", args)
+		result := c.Collect(context.Background(), "query_docker_logs", tc.args)
+		if !result.Error || result.Issues[0].Code != tc.code {
+			t.Fatalf("mutation-shaped argument accepted: %+v", tc.args)
 		}
 	}
 	if len(observer.requests) != before {
@@ -623,7 +661,7 @@ func TestDockerGrantCannotMutate(t *testing.T) {
 			}
 		}
 	}
-	result := c.Collect(context.Background(), "unknown_docker_mutation", contract.Args{})
+	result := c.Collect(context.Background(), "unknown_docker_mutation", contract.NoArgs{})
 	if result.Issues[0].Code != "unsupported_operation" {
 		t.Fatal("unknown docker operation reached the collector")
 	}
@@ -649,8 +687,6 @@ func id64For(n int) string {
 	return string(b)
 }
 
-func intPtr(v int) *int { return &v }
-
 func int64Ptr(v int64) *int64 { return &v }
 
 func TestDockerCollectorAdmitsBoundedConcurrentWork(t *testing.T) {
@@ -671,8 +707,8 @@ func TestDockerCollectorAdmitsBoundedConcurrentWork(t *testing.T) {
 	for range 8 {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			c.Collect(context.Background(), "list_docker_containers", contract.Args{})
-			c.Collect(context.Background(), "list_docker_images", contract.Args{})
+			c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
+			c.Collect(context.Background(), "list_docker_images", contract.PageArgs{})
 		}()
 	}
 	for range 8 {
@@ -750,7 +786,7 @@ func TestDockerCapabilitiesFollowGrantsAndObserver(t *testing.T) {
 		t.Fatal("unreachable observer discovered tools")
 	}
 	// Unrelated discovery still works with Docker unavailable.
-	result := c.Collect(context.Background(), "get_os_info", contract.Args{})
+	result := c.Collect(context.Background(), "get_os_info", contract.NoArgs{})
 	_ = result
 }
 
@@ -768,26 +804,36 @@ func TestDockerEvidenceNeverRetained(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"*"}, nil, observer)
-	for _, tool := range []string{
-		"get_docker_info", "list_docker_containers", "list_docker_images", "list_docker_volumes",
-		"list_docker_networks", "get_docker_disk_usage", "get_docker_container", "get_docker_container_stats", "query_docker_logs",
+	for _, tc := range []struct {
+		tool string
+		args any
+	}{
+		{"get_docker_info", contract.NoArgs{}},
+		{"list_docker_containers", contract.PageArgs{}},
+		{"list_docker_images", contract.PageArgs{}},
+		{"list_docker_volumes", contract.PageArgs{}},
+		{"list_docker_networks", contract.PageArgs{}},
+		{"get_docker_disk_usage", contract.NoArgs{}},
+		{"get_docker_container", contract.ContainerArgs{Container: marker}},
+		{"get_docker_container_stats", contract.ContainerArgs{Container: marker}},
+		{"query_docker_logs", contract.DockerLogsArgs{Container: marker}},
 	} {
 		before := len(observer.requests)
-		c.Collect(context.Background(), tool, contract.Args{Container: marker, Path: marker})
+		c.Collect(context.Background(), tc.tool, tc.args)
 		// Every request re-reads the daemon; no retained inventory serves it.
 		if len(observer.requests) <= before {
-			t.Fatalf("%s did not re-read the daemon", tool)
+			t.Fatalf("%s did not re-read the daemon", tc.tool)
 		}
 	}
 	// Failure and cancellation paths release observations.
 	observer.err = errors.New("down")
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if !result.Error {
 		t.Fatal("failure hidden")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result = c.Collect(ctx, "list_docker_containers", contract.Args{})
+	result = c.Collect(ctx, "list_docker_containers", contract.PageArgs{})
 	if result.Issues[0].Code != "cancelled_or_timeout" {
 		t.Fatal(result)
 	}

@@ -88,7 +88,9 @@ func TestLifecycle(t *testing.T) {
 func TestEveryToolRole(t *testing.T) {
 	for i, role := range []string{"health", "inspect", "diagnostics"} {
 		for j, tool := range contract.ToolNames() {
-			want := j < 3 || i >= 1 && j < 6 || i == 2
+			// get_hostlens_info (index 15) is available from the health role;
+			// every other diagnostics-only tool keeps its level.
+			want := j < 3 || j == 15 || i >= 1 && j < 6 || i == 2
 			if Allows([]string{role}, tool) != want {
 				t.Errorf("%s %s", role, tool)
 			}

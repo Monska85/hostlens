@@ -65,8 +65,9 @@ func TestRawTailRecordBoundaries(t *testing.T) {
 			c.Config.Limits.InspectionBytes = tc.limit
 			path := filepath.Join(dir, "log")
 			fixtureOK(t, os.WriteFile(path, []byte(tc.content), 0600))
-			r := c.Collect(context.Background(), "query_logs", contract.Args{Path: path, RawTail: true})
-			if r.Error || !reflect.DeepEqual(r.Data["lines"], tc.want) || r.Truncated != tc.truncated {
+			r := c.Collect(context.Background(), "query_logs", contract.LogsArgs{Path: path, RawTail: true})
+			lp, ok := r.Data.(contract.LogPage)
+			if !ok || r.Error || !reflect.DeepEqual(lp.Lines, tc.want) || r.Truncated != tc.truncated {
 				t.Fatalf("unexpected tail: %+v", r)
 			}
 		})
@@ -85,9 +86,9 @@ func TestJournalUnsupportedFieldsAreExplicitAndBounded(t *testing.T) {
 	valid := fmt.Sprintf(`{"__REALTIME_TIMESTAMP":"%d","MESSAGE":"ok","PRIORITY":"3","_SYSTEMD_UNIT":"app.service"}`, timestamp.UnixMicro())
 	invalid := strings.Replace(valid, `"MESSAGE":"ok"`, `"MESSAGE":[65,66]`, 1)
 	c.Runner = &fakeRunner{out: strings.Repeat(invalid+"\n", 1000) + valid + "\n"}
-	r := c.Collect(context.Background(), "query_logs", contract.Args{Unit: "app.service", Since: timestamp.Add(-time.Minute).Format(time.RFC3339), Until: timestamp.Add(time.Minute).Format(time.RFC3339)})
-	entries, ok := r.Data["entries"].([]map[string]any)
-	if !ok || len(entries) != 1 || entries[0]["message"] != "ok" || len(r.Issues) != 2 || r.Issues[0].Code != "invalid_journal_record" || !strings.Contains(r.Issues[0].Message, "1000 records") {
+	r := c.Collect(context.Background(), "query_logs", contract.LogsArgs{Unit: "app.service", Since: timestamp.Add(-time.Minute).Format(time.RFC3339), Until: timestamp.Add(time.Minute).Format(time.RFC3339)})
+	lp, ok := r.Data.(contract.LogPage)
+	if !ok || len(lp.Entries) != 1 || lp.Entries[0].Message != "ok" || len(r.Issues) != 2 || r.Issues[0].Code != "invalid_journal_record" || !strings.Contains(r.Issues[0].Message, "1000 records") {
 		t.Fatalf("unsupported journal fields hidden or unbounded: %+v", r)
 	}
 }
@@ -108,8 +109,9 @@ func TestCancelledServiceParsingCannotReportHealthy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.Runner = cancellingServiceRunner{cancel}
-	r := c.Collect(ctx, "get_health_snapshot", contract.Args{})
-	if !r.Error || r.Data["complete"] != false || !reflect.DeepEqual(r.Data["missing_required"], []string{"services"}) {
+	r := c.Collect(ctx, "get_health_snapshot", contract.NoArgs{})
+	snap, _ := r.Data.(contract.HealthSnapshot)
+	if !r.Error || snap.Complete || !reflect.DeepEqual(snap.MissingRequired, []string{"services"}) {
 		t.Fatalf("cancelled parsing reported healthy: %+v", r)
 	}
 }

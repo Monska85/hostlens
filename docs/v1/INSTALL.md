@@ -37,7 +37,7 @@ tar -xzf hostlens-0.1.0-linux-amd64.tar.gz -C /opt/hostlens-release
 ls /opt/hostlens-release
 ```
 
-The extracted set contains the `hostlens`, `hostlens-diagnostics`, and `hostlens-docker-observer` executables, `release.json` (the per-member upgrade manifest), `config.example.yaml`, `nginx.yaml`, `allow-all.yaml`, and `docker-readonly.yaml` under `profiles/`, `OPERATIONS.md`, `INSTALL.md`, `VALIDATION.md`, `LICENSE`, `NOTICE.txt`, and the upstream `licenses/` directory.
+The extracted set contains the `hostlens`, `hostlens-diagnostics`, and `hostlens-docker-observer` executables, `release.json` (the per-member upgrade manifest), `tools.json` (the pinned MCP tool contract snapshot for UI clients), `config.example.yaml`, `nginx.yaml`, `allow-all.yaml`, and `docker-readonly.yaml` under `profiles/`, `OPERATIONS.md`, `INSTALL.md`, `VALIDATION.md`, `LICENSE`, `NOTICE.txt`, and the upstream `licenses/` directory.
 
 Every release asset also carries a GitHub build provenance attestation recorded by the release workflow once the repository is public; while it is private, the workflow reports attestations as explicitly unavailable and delivery remains checksum-verified. From a repository checkout you can verify that the exact archive bytes were built by this repository's workflow:
 

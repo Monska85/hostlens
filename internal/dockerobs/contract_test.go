@@ -120,33 +120,33 @@ func TestResponseExcludesUnknownFields(t *testing.T) {
 	if e := json.Unmarshal([]byte(payload), &summary); e != nil {
 		t.Fatal(e)
 	}
-	data := ContainerData(summary)
-	for key := range data {
+	wire := payloadKeys(t, ToContainer(summary))
+	for key := range wire {
 		switch key {
 		case "id", "names", "image_id", "state", "image", "status", "health", "created", "started_at", "finished_at", "restart_count", "ports", "mounts", "networks", "log_driver", "restart_policy", "pids_limit", "nano_cpus", "cpu_shares", "cpu_period", "cpu_quota", "memory_limit", "memory_swap":
 		default:
 			t.Fatalf("projection emitted unmaintained key %s", key)
 		}
 	}
-	if _, ok := data["sneaky_future_field"]; ok {
+	if _, ok := wire["sneaky_future_field"]; ok {
 		t.Fatal("unknown daemon field crossed the projection")
 	}
 }
 
 func TestProjectionOmitsMissingSize(t *testing.T) {
-	volume := VolumeData(VolumeSummary{Name: "data", Driver: "local"})
+	volume := payloadKeys(t, ToVolume(VolumeSummary{Name: "data", Driver: "local"}))
 	if _, ok := volume["size"]; ok {
 		t.Fatal("missing volume size must be omitted, never zero")
 	}
-	image := ImageData(ImageSummary{ID: "sha256:x"})
+	image := payloadKeys(t, ToImage(ImageSummary{ID: "sha256:x"}))
 	if _, ok := image["size"]; ok {
 		t.Fatal("missing image size must be omitted")
 	}
 }
 
 func TestReclaimableNeverClaimsDuration(t *testing.T) {
-	data := ReclaimableData(&Reclaimable{ObservationStable: true, UnusedImages: []string{"a"}})
-	for key := range data {
+	wire := payloadKeys(t, ToReclaimable(&Reclaimable{ObservationStable: true, UnusedImages: []string{"a"}}))
+	for key := range wire {
 		switch key {
 		case "observation_stable", "unused_image_ids", "unused_image_unique_bytes", "unused_volume_names", "unused_volume_bytes", "stopped_container_ids", "dangling_image_ids", "criteria", "advisory":
 		default:
@@ -154,7 +154,7 @@ func TestReclaimableNeverClaimsDuration(t *testing.T) {
 		}
 	}
 	for _, banned := range []string{"unused_since", "unused_duration", "last_use"} {
-		if _, ok := data[banned]; ok {
+		if _, ok := wire[banned]; ok {
 			t.Fatalf("reclaimable must not claim %s", banned)
 		}
 	}
@@ -162,11 +162,12 @@ func TestReclaimableNeverClaimsDuration(t *testing.T) {
 
 func TestLogPageProjection(t *testing.T) {
 	when := time.Now().UTC()
-	data := LogPageData(&LogPage{Records: []LogRecord{{Stream: "stdout", Timestamp: &when, Message: "hello"}}, Truncated: true, Skipped: 2})
-	if _, ok := data["entries"].([]LogRecord); !ok {
+	wire := payloadKeys(t, ToLogPage(&LogPage{Records: []LogRecord{{Stream: "stdout", Timestamp: &when, Message: "hello"}}, Truncated: true, Skipped: 2}))
+	entries, ok := wire["entries"].([]any)
+	if !ok || len(entries) != 1 {
 		t.Fatal("records must survive projection")
 	}
-	if data["truncated"] != true || data["skipped_frames"] != 2 {
+	if wire["truncated"] != true || wire["skipped_frames"] != float64(2) {
 		t.Fatal("truncation evidence lost")
 	}
 }

@@ -19,7 +19,7 @@ import (
 type deadlineCollector struct{}
 
 func (deadlineCollector) Capabilities(context.Context) map[string]bool { return nil }
-func (deadlineCollector) Collect(ctx context.Context, _ string, _ contract.Args) contract.Result {
+func (deadlineCollector) Collect(ctx context.Context, _ string, _ any) contract.Result {
 	<-ctx.Done()
 	return contract.Failure("timeout")
 }

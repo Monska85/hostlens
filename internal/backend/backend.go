@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 
@@ -134,6 +136,21 @@ func decode(r *http.Request, v any, n int64) error {
 	}
 	return nil
 }
+
+// decodeArgs decodes the raw IPC argument object into the typed argument
+// struct for one tool. Unknown members and malformed values are rejected;
+// absent or null arguments decode to the zero struct, matching tools whose
+// schema has no required members.
+func decodeArgs(raw json.RawMessage, v any) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	d := json.NewDecoder(bytes.NewReader(trimmed))
+	d.DisallowUnknownFields()
+	return d.Decode(v)
+}
+
 func respond(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
@@ -255,6 +272,14 @@ func (s *Server) Call(ctx context.Context, req contract.Request) (result contrac
 		s.mu.Unlock()
 		return contract.Failure("unsupported_operation")
 	}
+	// Decode into the definition's argument type and pass the decoded value,
+	// not the pointer: collectors type-assert the value type.
+	value := reflect.New(definition.In)
+	if err := decodeArgs(req.Args, value.Interface()); err != nil {
+		s.mu.Unlock()
+		return contract.Failure("invalid_arguments")
+	}
+	args := value.Elem().Interface()
 	if s.running >= snap.Config.Limits.Concurrent {
 		s.mu.Unlock()
 		return contract.Failure("overload")
@@ -277,7 +302,7 @@ func (s *Server) Call(ctx context.Context, req contract.Request) (result contrac
 				s.metrics.EndTool()
 			}
 		}()
-		done <- s.factory(snap).Collect(ctx, req.Tool, req.Args).Bounded(snap.Config.Limits.ResponseBytes)
+		done <- s.factory(snap).Collect(ctx, req.Tool, args).Bounded(snap.Config.Limits.ResponseBytes)
 	}()
 	select {
 	case result = <-done:

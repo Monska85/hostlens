@@ -9,15 +9,16 @@ import (
 	"github.com/Monska85/hostlens/internal/contract"
 )
 
-func (c *Collector) auditAccounts(ctx context.Context, r *contract.Result, a contract.Args) {
+func (c *Collector) auditAccounts(ctx context.Context, r *contract.Result, a contract.PageArgs) bool {
+	p := r.Data.(*contract.AccountPage)
 	r.Source = "/etc/passwd,/etc/group"
-	r.Data["scope"] = "local account files; excludes directory services, effective sudo/SSH authorization and password state"
-	r.Data["snapshot_consistent"] = false
-	items := []map[string]any{}
+	p.Scope = "local account files; excludes directory services, effective sudo/SSH authorization and password state"
+	p.SnapshotConsistent = false
+	rows := []contract.AccountRow{}
 	successfulSources := 0
 	remainingMembers := auditMaxEntries
 	for _, path := range []string{"/etc/passwd", "/etc/group"} {
-		if len(items) >= auditMaxEntries {
+		if len(rows) >= auditMaxEntries {
 			r.Truncated = true
 			auditIssue(r, "inspection_limit", path, "account record limit reached")
 			break
@@ -40,7 +41,7 @@ func (c *Collector) auditAccounts(ctx context.Context, r *contract.Result, a con
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
-			if len(items) >= auditMaxEntries {
+			if len(rows) >= auditMaxEntries {
 				r.Truncated = true
 				auditIssue(r, "inspection_limit", path, "account record limit reached")
 				break
@@ -59,21 +60,18 @@ func (c *Collector) auditAccounts(ctx context.Context, r *contract.Result, a con
 				malformed = true
 				continue
 			}
-			row := map[string]any{"name": fields[0]}
 			if want == 7 {
 				gid, err := strconv.ParseUint(fields[3], 10, 32)
 				if err != nil {
 					malformed = true
 					continue
 				}
-				row["kind"] = "account"
-				row["uid"] = id
-				row["gid"] = gid
-				row["home"] = fields[5]
-				row["shell"] = fields[6]
+				uid := uint32(id)
+				accountGID := uint32(gid)
+				home := fields[5]
+				shell := fields[6]
+				rows = append(rows, contract.AccountRow{Name: fields[0], Kind: "account", UID: &uid, GID: &accountGID, Home: &home, Shell: &shell})
 			} else {
-				row["kind"] = "group"
-				row["gid"] = id
 				members := []string{}
 				if fields[3] != "" {
 					members = strings.SplitN(fields[3], ",", remainingMembers+1)
@@ -84,9 +82,9 @@ func (c *Collector) auditAccounts(ctx context.Context, r *contract.Result, a con
 					}
 				}
 				remainingMembers -= len(members)
-				row["members"] = members
+				groupGID := uint32(id)
+				rows = append(rows, contract.AccountRow{Name: fields[0], Kind: "group", GID: &groupGID, Members: members})
 			}
-			items = append(items, row)
 		}
 		if malformed {
 			auditIssue(r, "malformed_source", path, "invalid local identity records omitted")
@@ -95,8 +93,13 @@ func (c *Collector) auditAccounts(ctx context.Context, r *contract.Result, a con
 	if successfulSources == 0 {
 		r.Error = true
 	}
-	page(r, items, a, c.Config.Limits.PageSize)
+	window, next, ok := pageWindow(r, rows, a, c.Config.Limits.PageSize)
+	if ok {
+		p.Items = window
+		r.NextOffset = next
+	}
 	auditIssue(r, "evidence_unavailable", "accounts", "password lock/expiry state, external identities and effective sudo/SSH authorization are not collected; approve selected configuration sources for investigation")
+	return ok
 }
 
 func (c *Collector) auditSystemContinue(ctx context.Context, r *contract.Result, source string) bool {

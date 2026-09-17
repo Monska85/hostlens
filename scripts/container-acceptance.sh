@@ -6,11 +6,16 @@ if [ "${1:-test}" = archives ]; then
   cd /source
   go build -o /tmp/archive ./tools/archive
   cd /archives
-  sha256sum "hostlens-${HOSTLENS_VERSION}-linux-amd64.tar.gz" "hostlens-${HOSTLENS_VERSION}-linux-arm64.tar.gz" | sort >/tmp/hostlens-expected-checksums
-  sort checksums.txt | diff /tmp/hostlens-expected-checksums -
+  # checksums.txt may also carry the standalone tools.json asset line uploaded
+  # at publish time; filter it here and verify the two archives strictly.
+  sort checksums.txt | grep -v "hostlens-${HOSTLENS_VERSION}-tools.json" >/tmp/hostlens-checksums
+  sha256sum "hostlens-${HOSTLENS_VERSION}-linux-amd64.tar.gz" "hostlens-${HOSTLENS_VERSION}-linux-arm64.tar.gz" | sort | diff /tmp/hostlens-checksums -
   for arch in amd64 arm64; do
     /tmp/archive -archive "hostlens-${HOSTLENS_VERSION}-linux-${arch}.tar.gz" -dest "/tmp/extracted-${arch}" -arch "${arch}" -version "${HOSTLENS_VERSION}"
   done
+  # The tool-contract snapshot is architecture-independent by construction;
+  # both archives must carry byte-identical copies.
+  cmp "/tmp/extracted-amd64/tools.json" "/tmp/extracted-arm64/tools.json"
   # Every shipped markdown link resolves inside the archive or points at the
   # repository GitHub URL; repo-only relative targets are rewritten at build
   # time by tools/release/prepare.py.

@@ -21,7 +21,7 @@ import (
 type dockerCapabilityCollector struct{ caps map[string]bool }
 
 func (c dockerCapabilityCollector) Capabilities(context.Context) map[string]bool { return c.caps }
-func (c dockerCapabilityCollector) Collect(context.Context, string, contract.Args) contract.Result {
+func (c dockerCapabilityCollector) Collect(context.Context, string, any) contract.Result {
 	return contract.Result{Data: map[string]any{"observed": true}}
 }
 

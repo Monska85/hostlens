@@ -145,67 +145,42 @@ func (c *Collector) Capabilities(ctx context.Context) map[string]bool {
 	return m
 }
 func (c *Collector) result() contract.Result {
-	r := contract.Result{ObservedAt: time.Now().UTC(), Data: map[string]any{}}
+	r := contract.Result{ObservedAt: time.Now().UTC()}
 	if b, e := c.file("/proc/sys/kernel/hostname", true); e == nil {
 		r.Host = strings.TrimSpace(string(b))
 	}
 	return r
 }
-func (c *Collector) Collect(ctx context.Context, tool string, a contract.Args) contract.Result {
+func (c *Collector) Collect(ctx context.Context, tool string, args any) contract.Result {
 	if ctx.Err() != nil {
 		r := contract.Failure("cancelled_or_timeout")
 		r.Truncated = true
 		return r
 	}
 	if _, dockerTool := dockerToolKinds[tool]; dockerTool {
-		return c.docker(ctx, tool, a)
+		return c.docker(ctx, tool, args)
 	}
 	r := c.result()
 	if domain := contract.AuditDomain(tool); domain != "" {
-		return c.collectAudit(ctx, tool, domain, a, r)
+		return c.collectAudit(ctx, tool, domain, args, r)
 	}
 	switch tool {
 	case "get_os_info":
 		r.Data = c.osInfo(&r)
 	case "get_inventory":
-		r.Data["os"] = c.osInfo(&r)
-		for key, p := range map[string]string{"machine_id": "/etc/machine-id", "product_name": "/sys/class/dmi/id/product_name", "system_vendor": "/sys/class/dmi/id/sys_vendor"} {
-			if ctx.Err() != nil {
-				break
-			}
-			if b, e := c.file(p, true); e == nil && strings.TrimSpace(string(b)) != "" {
-				r.Data[key] = strings.TrimSpace(string(b))
-			}
-		}
-		r.Data["scope"] = "process mount and PID namespaces"
+		c.inventory(&r, ctx)
 	case "read_config":
-		c.readConfig(&r, a)
+		c.readConfig(&r, args)
 	case "query_logs":
-		c.logs(ctx, &r, a)
+		c.logs(ctx, &r, args)
 	case "list_services", "get_service_status":
-		c.services(ctx, &r, tool, a)
+		c.services(ctx, &r, tool, args)
 	case "list_packages":
-		c.packages(ctx, &r, a)
+		c.packages(ctx, &r, args)
 	case "get_health_snapshot":
 		c.health(ctx, &r)
 	default:
 		return contract.Failure("unsupported_operation")
-	}
-	if len(r.Issues) > 0 {
-		switch tool {
-		case "read_config":
-			_, ok := r.Data["content"]
-			r.Error = !ok
-		case "query_logs":
-			_, entries := r.Data["entries"]
-			_, lines := r.Data["lines"]
-			r.Error = !entries && !lines
-		case "list_services", "list_packages":
-			_, ok := r.Data["items"]
-			r.Error = !ok
-		case "get_service_status":
-			r.Error = len(r.Data) == 0 || r.Data["LoadState"] == "not-found"
-		}
 	}
 	if e := ctx.Err(); e != nil {
 		r.Error = true
@@ -213,8 +188,8 @@ func (c *Collector) Collect(ctx context.Context, tool string, a contract.Args) c
 	}
 	return r
 }
-func (c *Collector) osInfo(r *contract.Result) map[string]any {
-	out := map[string]any{"family": "linux", "architecture": runtime.GOARCH}
+func (c *Collector) osInfo(r *contract.Result) contract.OSInfo {
+	out := contract.OSInfo{Family: "linux", Architecture: runtime.GOARCH}
 	r.Source = "os-release; kernel interfaces"
 	b, e := c.file("/etc/os-release", true)
 	if e != nil {
@@ -226,54 +201,111 @@ func (c *Collector) osInfo(r *contract.Result) map[string]any {
 				continue
 			}
 			v = strings.Trim(v, "\"'")
-			key := map[string]string{"ID": "distribution", "NAME": "product", "VERSION_ID": "version", "VERSION_CODENAME": "codename"}[k]
-			if key != "" && v != "" {
-				out[key] = v
+			if v == "" {
+				continue
+			}
+			switch k {
+			case "ID":
+				out.Distribution = v
+			case "NAME":
+				out.Product = v
+			case "VERSION_ID":
+				out.Version = v
+			case "VERSION_CODENAME":
+				out.Codename = v
 			}
 		}
 	}
 	if b, e := c.file("/proc/sys/kernel/osrelease", true); e == nil {
-		out["kernel"] = strings.TrimSpace(string(b))
+		out.Kernel = strings.TrimSpace(string(b))
 	} else {
 		r.Issue("collection_failed", "kernel", e.Error())
 	}
 	return out
 }
-func (c *Collector) readConfig(r *contract.Result, a contract.Args) {
+func (c *Collector) inventory(r *contract.Result, ctx context.Context) {
+	r.Source = "os-release; kernel interfaces"
+	inv := contract.Inventory{OS: c.osInfo(r), Scope: "process mount and PID namespaces"}
+	for key, p := range map[string]string{"machine_id": "/etc/machine-id", "product_name": "/sys/class/dmi/id/product_name", "system_vendor": "/sys/class/dmi/id/sys_vendor"} {
+		if ctx.Err() != nil {
+			break
+		}
+		if b, e := c.file(p, true); e == nil && strings.TrimSpace(string(b)) != "" {
+			v := strings.TrimSpace(string(b))
+			switch key {
+			case "machine_id":
+				inv.MachineID = v
+			case "product_name":
+				inv.ProductName = v
+			case "system_vendor":
+				inv.SystemVendor = v
+			}
+		}
+	}
+	r.Data = inv
+}
+func (c *Collector) readConfig(r *contract.Result, args any) {
+	a, ok := args.(contract.PathArgs)
+	if !ok {
+		r.Issue("invalid_arguments", "", "path argument required")
+		r.Error = true
+		return
+	}
 	f, e := OpenRegular(a.Path, c.Policy)
 	if e != nil {
 		r.Issue("source_denied_or_unavailable", a.Path, e.Error())
+		r.Error = true
 		return
 	}
 	defer f.Close()
 	b, e := ReadBounded(f, c.Config.Limits.ConfigBytes)
 	if e != nil {
 		r.Issue("size_or_read_failure", a.Path, e.Error())
+		r.Error = true
 		return
 	}
 	if !utf8.Valid(b) {
 		r.Issue("unsupported_encoding", a.Path, "UTF-8 required")
+		r.Error = true
 		return
 	}
 	r.Source = a.Path
-	r.Data["content"] = string(b)
+	r.Data = contract.ConfigFile{Content: string(b)}
 }
-func page(r *contract.Result, items []map[string]any, a contract.Args, maxPage int) {
+
+// pageWindow windows one complete inventory into the requested bounded page
+// window and reports the offset of the next page when one exists. maxPage is
+// the administrator's page ceiling; bounds that exceed it are rejected with an
+// invalid_bounds issue and no page.
+func pageWindow[T any](r *contract.Result, items []T, a contract.PageArgs, maxPage int) ([]T, *int, bool) {
 	limit := a.Limit
 	if limit == 0 {
 		limit = maxPage
 	}
 	if limit < 1 || limit > maxPage || a.Offset < 0 {
 		r.Issue("invalid_bounds", "", "page bounds exceed ceiling")
-		return
+		return nil, nil, false
 	}
 	start := min(a.Offset, len(items))
 	end := min(start+limit, len(items))
-	r.Data["items"] = items[start:end]
-	r.Data["snapshot_consistent"] = false
+	var next *int
 	if end < len(items) {
-		r.NextOffset = &end
+		next = &end
 	}
+	return items[start:end], next, true
+}
+
+// page windows one complete inventory into the requested bounded page, stores
+// the page in the result, and reports whether the requested bounds were valid.
+func page[T any](r *contract.Result, items []T, a contract.PageArgs, maxPage int) (contract.Page[T], bool) {
+	window, next, ok := pageWindow(r, items, a, maxPage)
+	if !ok {
+		return contract.Page[T]{}, false
+	}
+	p := contract.Page[T]{Items: window}
+	r.Data = p
+	r.NextOffset = next
+	return p, true
 }
 func (c *Collector) run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
@@ -284,54 +316,93 @@ func (c *Collector) run(ctx context.Context, name string, args ...string) ([]byt
 	}
 	return Commands{Limit: c.Config.Limits.InspectionBytes, Root: c.Root}.Run(ctx, name, args...)
 }
-func (c *Collector) services(ctx context.Context, r *contract.Result, tool string, a contract.Args) {
+func (c *Collector) services(ctx context.Context, r *contract.Result, tool string, args any) {
 	r.Source = "systemd"
 	if tool == "get_service_status" {
+		a, ok := args.(contract.UnitArgs)
+		if !ok {
+			r.Issue("invalid_arguments", "", "unit argument required")
+			r.Error = true
+			return
+		}
 		if !c.Policy.Allowed("files", "/run/systemd/system", true) {
 			r.Issue("policy_denied", r.Source, "systemd collector source denied")
+			r.Error = true
 			return
 		}
 		if !policy.ValidLinuxUnit(a.Unit) {
 			r.Issue("invalid_unit", "", "concrete systemd unit required")
+			r.Error = true
 			return
 		}
 		if !c.Policy.Allowed("journal", a.Unit, true) {
 			r.Issue("policy_denied", a.Unit, "unit explicitly denied")
+			r.Error = true
 			return
 		}
 		b, e := c.run(ctx, "systemctl", "show", "--no-pager", "--property=Id,LoadState,ActiveState,SubState,UnitFileState,MainPID,Result", "--", a.Unit)
 		if e != nil {
 			r.Issue("collection_failed", r.Source, "service query failed")
+			r.Error = true
 			return
 		}
+		st := contract.ServiceStatus{}
 		for _, line := range strings.Split(string(b), "\n") {
 			k, v, ok := strings.Cut(line, "=")
-			if ok && v != "" && strings.Contains("|Id|LoadState|ActiveState|SubState|UnitFileState|MainPID|Result|", "|"+k+"|") {
-				r.Data[k] = v
+			if !ok || v == "" {
+				continue
+			}
+			switch k {
+			case "Id":
+				st.ID = v
+			case "LoadState":
+				st.LoadState = v
+			case "ActiveState":
+				st.ActiveState = v
+			case "SubState":
+				st.SubState = v
+			case "UnitFileState":
+				st.UnitFileState = v
+			case "MainPID":
+				st.MainPID = v
+			case "Result":
+				st.Result = v
 			}
 		}
-		if r.Data["LoadState"] == "not-found" {
+		if st.LoadState == "not-found" {
 			r.Issue("not_found", a.Unit, "unit not found")
+			r.Error = true
 		}
+		r.Data = st
 		return
 	}
-	items := c.serviceObservations(ctx, r)
-	if items != nil {
-		page(r, items, a, c.Config.Limits.PageSize)
+	a, ok := args.(contract.PageArgs)
+	if !ok {
+		r.Issue("invalid_arguments", "", "page arguments required")
+		r.Error = true
+		return
+	}
+	items, ok := c.serviceObservations(ctx, r)
+	if !ok {
+		r.Error = true
+		return
+	}
+	if _, ok := page(r, items, a, c.Config.Limits.PageSize); !ok {
+		r.Error = true
 	}
 }
 
-func (c *Collector) serviceObservations(ctx context.Context, r *contract.Result) []map[string]any {
+func (c *Collector) serviceObservations(ctx context.Context, r *contract.Result) ([]contract.ServiceRow, bool) {
 	if !c.Policy.Allowed("files", "/run/systemd/system", true) {
 		r.Issue("policy_denied", "systemd", "systemd collector source denied")
-		return nil
+		return nil, false
 	}
 	b, e := c.run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend")
 	if e != nil {
 		r.Issue("collection_failed", "systemd", "service list failed")
-		return nil
+		return nil, false
 	}
-	items := []map[string]any{}
+	items := []contract.ServiceRow{}
 	invalid := 0
 	for _, line := range strings.Split(string(b), "\n") {
 		if ctx.Err() != nil {
@@ -344,7 +415,7 @@ func (c *Collector) serviceObservations(ctx context.Context, r *contract.Result)
 				r.Issue("policy_denied", f[0], "unit omitted by explicit source denial")
 				continue
 			}
-			items = append(items, map[string]any{"unit": f[0], "load": f[1], "active": f[2], "sub": f[3]})
+			items = append(items, contract.ServiceRow{Unit: f[0], Load: f[1], Active: f[2], Sub: f[3]})
 		} else if len(f) != 0 {
 			invalid++
 		}
@@ -352,7 +423,7 @@ func (c *Collector) serviceObservations(ctx context.Context, r *contract.Result)
 	if invalid > 0 {
 		r.Issue("invalid_service_record", "systemd", fmt.Sprintf("%d malformed service records omitted", invalid))
 	}
-	return items
+	return items, true
 }
 func (c *Collector) packageCommand() (string, string, []string, error) {
 	for _, candidate := range []struct {
@@ -372,26 +443,36 @@ func (c *Collector) packageCommand() (string, string, []string, error) {
 	}
 	return "", "", nil, errors.New("package collector unavailable")
 }
-func (c *Collector) packages(ctx context.Context, r *contract.Result, a contract.Args) {
-	name, source, args, err := c.packageCommand()
+func (c *Collector) packages(ctx context.Context, r *contract.Result, args any) {
+	a, ok := args.(contract.PageArgs)
+	if !ok {
+		r.Issue("invalid_arguments", "", "page arguments required")
+		r.Error = true
+		return
+	}
+	name, source, cmdArgs, err := c.packageCommand()
 	if err != nil {
 		r.Issue("collection_failed", "packages", err.Error())
+		r.Error = true
 		return
 	}
 	r.Source = name
 	if !c.Policy.Allowed("files", source, true) {
 		r.Issue("policy_denied", source, "package source denied")
+		r.Error = true
 		return
 	}
-	b, e := c.run(ctx, name, args...)
+	b, e := c.run(ctx, name, cmdArgs...)
 	if e != nil {
 		r.Issue("collection_failed", source, "package collection failed")
+		r.Error = true
 		return
 	}
-	items := []map[string]any{}
+	items := []contract.PackageRow{}
 	for _, line := range strings.Split(string(b), "\n") {
 		if ctx.Err() != nil {
 			r.Issue("cancelled_or_timeout", r.Source, ctx.Err().Error())
+			r.Error = true
 			return
 		}
 		f := strings.Fields(line)
@@ -404,23 +485,25 @@ func (c *Collector) packages(ctx context.Context, r *contract.Result, a contract
 			f = f[1:]
 		}
 		if len(f) == 2 {
-			items = append(items, map[string]any{"name": f[0], "version": f[1]})
+			items = append(items, contract.PackageRow{Name: f[0], Version: f[1]})
 		}
 	}
-	page(r, items, a, c.Config.Limits.PageSize)
+	if _, ok := page(r, items, a, c.Config.Limits.PageSize); !ok {
+		r.Error = true
+	}
 }
-func window(a contract.Args, l config.Limits) (time.Time, time.Time, error) {
+func window(sinceText, untilText string, l config.Limits) (time.Time, time.Time, error) {
 	until := time.Now().UTC()
 	var e error
-	if a.Until != "" {
-		until, e = time.Parse(time.RFC3339Nano, a.Until)
+	if untilText != "" {
+		until, e = time.Parse(time.RFC3339Nano, untilText)
 		if e != nil {
 			return time.Time{}, time.Time{}, e
 		}
 	}
 	since := until.Add(-l.DefaultLogWindow)
-	if a.Since != "" {
-		since, e = time.Parse(time.RFC3339Nano, a.Since)
+	if sinceText != "" {
+		since, e = time.Parse(time.RFC3339Nano, sinceText)
 		if e != nil {
 			return since, until, e
 		}
@@ -430,56 +513,70 @@ func window(a contract.Args, l config.Limits) (time.Time, time.Time, error) {
 	}
 	return since, until, nil
 }
-func (c *Collector) logs(ctx context.Context, r *contract.Result, a contract.Args) {
+func (c *Collector) logs(ctx context.Context, r *contract.Result, args any) {
+	a, ok := args.(contract.LogsArgs)
+	if !ok {
+		r.Issue("invalid_arguments", "", "log selector required")
+		r.Error = true
+		return
+	}
 	l := c.Config.Limits
 	n := a.Limit
 	if n == 0 {
 		n = l.LogEntries
 	}
-	if n < 1 || n > l.LogEntries || a.Offset != 0 || (a.Path == "") == (a.Unit == "") {
+	if n < 1 || n > l.LogEntries || (a.Path == "") == (a.Unit == "") {
 		r.Issue("invalid_bounds", "", "select one source within entry ceiling")
+		r.Error = true
 		return
 	}
 	if a.Priority != nil && (*a.Priority < 0 || *a.Priority > 7) {
 		r.Issue("unsupported_filter", "", "priority must be 0 through 7")
+		r.Error = true
 		return
 	}
-	since, until, e := window(a, l)
+	since, until, e := window(a.Since, a.Until, l)
 	if e != nil {
 		r.Issue("invalid_window", "", e.Error())
-		return
-	}
-	r.Data["requested_since"] = since
-	r.Data["requested_until"] = until
-	r.Data["coverage_complete"] = false
-	if a.Unit != "" {
-		c.journal(ctx, r, a, n, since, until)
+		r.Error = true
 		return
 	}
 	r.Source = a.Path
+	lp := contract.LogPage{RequestedSince: since, RequestedUntil: until, CoverageComplete: false}
+	if a.Unit != "" {
+		c.journal(ctx, r, &lp, a, n, since, until)
+		if r.Data == nil {
+			r.Error = true
+		}
+		return
+	}
 	f, e := OpenRegular(a.Path, c.Policy)
 	if e != nil {
 		r.Issue("source_denied_or_unavailable", a.Path, e.Error())
+		r.Error = true
 		return
 	}
 	defer f.Close()
 	st, e := f.Stat()
 	if e != nil {
 		r.Issue("collection_failed", a.Path, e.Error())
+		r.Error = true
 		return
 	}
-	r.Data["rotation_scope"] = "selected open file only"
-	r.Data["ordering"] = "physical file order"
-	r.Data["parser"] = a.Format
+	lp.RotationScope = "selected open file only"
+	lp.Ordering = "physical file order"
+	lp.Parser = a.Format
 	if a.RawTail {
 		if a.Priority != nil || a.Since != "" || a.Until != "" || (a.Format != "" && a.Format != "raw") {
 			r.Issue("unsupported_filter", a.Path, "raw tail has no verified timestamp or severity")
+			r.Error = true
 			return
 		}
 		b, truncated, e := readTailWindow(f, st.Size(), l.InspectionBytes)
 		r.Truncated = truncated
 		if e != nil {
 			r.Issue("collection_failed", a.Path, e.Error())
+			r.Error = true
 			return
 		}
 		if r.Truncated && len(b) > 0 {
@@ -493,6 +590,7 @@ func (c *Collector) logs(ctx context.Context, r *contract.Result, a contract.Arg
 		}
 		if !utf8.Valid(b) {
 			r.Issue("unsupported_encoding", a.Path, "raw tail requires UTF-8")
+			r.Error = true
 			return
 		}
 		lines := []string{}
@@ -503,21 +601,24 @@ func (c *Collector) logs(ctx context.Context, r *contract.Result, a contract.Arg
 			lines = lines[len(lines)-n:]
 			r.Truncated = true
 		}
-		r.Data["lines"] = lines
+		lp.Lines = lines
+		r.Data = lp
 		r.Issue("unverified_time_coverage", a.Path, "raw tail does not establish event times")
 		return
 	}
 	if a.Format != "jsonl" {
 		r.Issue("unsupported_parser", a.Path, "time queries require explicit jsonl parser")
+		r.Error = true
 		return
 	}
 	b, e := ReadBounded(f, l.InspectionBytes)
 	if e != nil {
 		r.Truncated = true
 		r.Issue("inspection_limit", a.Path, e.Error())
+		r.Error = true
 		return
 	}
-	entries := []map[string]any{}
+	entries := []contract.LogEntry{}
 	counts := map[string]int{}
 	for line := range strings.SplitSeq(string(b), "\n") {
 		if ctx.Err() != nil {
@@ -552,9 +653,10 @@ func (c *Collector) logs(ctx context.Context, r *contract.Result, a contract.Arg
 			r.Truncated = true
 			continue
 		}
-		entry := map[string]any{"timestamp": t, "message": *row.Message}
+		entry := contract.LogEntry{Timestamp: t, Message: *row.Message}
 		if row.Priority != nil && *row.Priority >= 0 && *row.Priority <= 7 {
-			entry["priority"] = *row.Priority
+			p := *row.Priority
+			entry.Priority = &p
 		}
 		entries = append(entries, entry)
 	}
@@ -567,8 +669,9 @@ func (c *Collector) logs(ctx context.Context, r *contract.Result, a contract.Arg
 			r.Issue(code, a.Path, fmt.Sprintf("%s (%d records)", message, count))
 		}
 	}
-	r.Data["entries"] = entries
-	returnedWindow(r, entries)
+	lp.Entries = entries
+	returnedWindow(&lp, entries)
+	r.Data = lp
 	r.Issue("retention_unverified", a.Path, "selected file cannot establish full rotation or retention coverage")
 }
 
@@ -584,7 +687,7 @@ func readTailWindow(f *os.File, observedEnd int64, limit int) ([]byte, bool, err
 	}
 	return b, truncated, err
 }
-func (c *Collector) journal(ctx context.Context, r *contract.Result, a contract.Args, n int, since, until time.Time) {
+func (c *Collector) journal(ctx context.Context, r *contract.Result, lp *contract.LogPage, a contract.LogsArgs, n int, since, until time.Time) {
 	r.Source = "journal:" + a.Unit
 	if !policy.ValidLinuxUnit(a.Unit) || !c.Policy.Allowed("journal", a.Unit, false) {
 		r.Issue("policy_denied", r.Source, "approved concrete journal unit required")
@@ -603,7 +706,7 @@ func (c *Collector) journal(ctx context.Context, r *contract.Result, a contract.
 		r.Issue("collection_failed", r.Source, "journal unavailable or inspection limit exceeded")
 		return
 	}
-	entries := []map[string]any{}
+	entries := []contract.LogEntry{}
 	invalid := 0
 	for _, line := range strings.Split(string(b), "\n") {
 		if ctx.Err() != nil {
@@ -637,13 +740,14 @@ func (c *Collector) journal(ctx context.Context, r *contract.Result, a contract.
 			invalid++
 			continue
 		}
-		entry := map[string]any{"timestamp": timestamp, "message": *row.Message}
+		entry := contract.LogEntry{Timestamp: timestamp, Message: *row.Message}
 		if p, e := strconv.Atoi(row.Priority); e == nil && p >= 0 && p <= 7 {
 			if a.Priority != nil && p > *a.Priority {
 				invalid++
 				continue
 			}
-			entry["priority"] = p
+			pp := p
+			entry.Priority = &pp
 		} else if row.Priority != "" || a.Priority != nil {
 			invalid++
 			continue
@@ -657,20 +761,18 @@ func (c *Collector) journal(ctx context.Context, r *contract.Result, a contract.
 		entries = entries[len(entries)-n:]
 		r.Truncated = true
 	}
-	r.Data["ordering"] = "oldest to newest in selected journal tail"
-	r.Data["entries"] = entries
-	returnedWindow(r, entries)
-	r.Data["rotation_scope"] = "accessible journal files for selected unit"
+	lp.Ordering = "oldest to newest in selected journal tail"
+	lp.Entries = entries
+	returnedWindow(lp, entries)
+	lp.RotationScope = "accessible journal files for selected unit"
+	r.Data = *lp
 	r.Issue("retention_unverified", r.Source, "accessible journal may omit rotated or inaccessible history")
 }
 
-func returnedWindow(r *contract.Result, entries []map[string]any) {
+func returnedWindow(lp *contract.LogPage, entries []contract.LogEntry) {
 	var first, last time.Time
 	for _, entry := range entries {
-		t, ok := entry["timestamp"].(time.Time)
-		if !ok {
-			continue
-		}
+		t := entry.Timestamp
 		if first.IsZero() || t.Before(first) {
 			first = t
 		}
@@ -679,7 +781,7 @@ func returnedWindow(r *contract.Result, entries []map[string]any) {
 		}
 	}
 	if !first.IsZero() {
-		r.Data["earliest_returned_event"] = first
-		r.Data["latest_returned_event"] = last
+		lp.EarliestReturnedEvent = &first
+		lp.LatestReturnedEvent = &last
 	}
 }

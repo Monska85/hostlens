@@ -253,11 +253,11 @@ func firstContainerName(s dockerobs.ContainerSummary) string {
 	return ""
 }
 
-// pagedProjects applies response-budget-aware pagination to sorted
-// projections. The default page derives from the response ceiling so a full
+// pagedProjects applies response-budget-aware pagination to sorted typed
+// rows. The default page derives from the response ceiling so a full
 // observation never discards the whole result at the backend output bound;
 // explicit limits above the budget clamp with a next page instead.
-func (c *Collector) pagedProjects(r *contract.Result, a contract.Args, items []map[string]any) {
+func (c *Collector) pagedProjects[T any](r *contract.Result, a contract.PageArgs, items []T) {
 	budget := c.Config.Limits.ResponseBytes / 2048
 	if budget < 1 {
 		budget = 1
@@ -276,12 +276,13 @@ func (c *Collector) pagedProjects(r *contract.Result, a contract.Args, items []m
 	}
 	start := min(a.Offset, len(items))
 	end := min(start+limit, len(items))
+	page := dockerobs.Page[T]{SnapshotConsistent: false}
 	if len(items) == 0 {
-		r.Data["items"] = items
+		page.Items = items
 	} else {
-		r.Data["items"] = items[start:end]
+		page.Items = items[start:end]
 	}
-	r.Data["snapshot_consistent"] = false
+	r.Data = &page
 	if end < len(items) {
 		r.NextOffset = &end
 	}
@@ -310,7 +311,7 @@ func (c *Collector) dockerAuthorized(tool string) bool {
 
 // docker dispatches the registered Docker tools. Rejections happen before
 // observer access; every result derives from live observations only.
-func (c *Collector) docker(ctx context.Context, tool string, a contract.Args) contract.Result {
+func (c *Collector) docker(ctx context.Context, tool string, args any) contract.Result {
 	if !c.dockerEnabled() {
 		return contract.Failure("docker_disabled")
 	}
@@ -321,28 +322,59 @@ func (c *Collector) docker(ctx context.Context, tool string, a contract.Args) co
 	}
 	r := c.result()
 	r.Source = "docker-observer"
+	// Seed the typed payload before dispatch so policy, selector, and
+	// observation failures marshal schema-valid zero payloads instead of an
+	// empty object the published output schema would reject.
 	switch tool {
 	case "get_docker_info":
+		r.Data = &dockerobs.EngineInfoPayload{}
 		return c.dockerInfo(ctx, &r)
 	case "list_docker_containers":
-		return c.dockerContainers(ctx, &r, a)
+		if a, ok := args.(contract.PageArgs); ok {
+			r.Data = &dockerobs.Page[dockerobs.ContainerPayload]{Items: []dockerobs.ContainerPayload{}}
+			return c.dockerContainers(ctx, &r, a)
+		}
 	case "get_docker_container":
-		return c.dockerContainer(ctx, &r, a)
+		if a, ok := args.(contract.ContainerArgs); ok {
+			r.Data = &dockerobs.ContainerDetailPayload{ContainerPayload: dockerobs.ContainerPayload{Names: []string{}}}
+			return c.dockerContainer(ctx, &r, a)
+		}
 	case "get_docker_container_stats":
-		return c.dockerStats(ctx, &r, a)
+		if a, ok := args.(contract.ContainerArgs); ok {
+			r.Data = &dockerobs.ContainerStatsPayload{}
+			return c.dockerStats(ctx, &r, a)
+		}
 	case "list_docker_images":
-		return c.dockerImages(ctx, &r, a)
+		if a, ok := args.(contract.PageArgs); ok {
+			r.Data = &dockerobs.Page[dockerobs.ImagePayload]{Items: []dockerobs.ImagePayload{}}
+			return c.dockerImages(ctx, &r, a)
+		}
 	case "list_docker_volumes":
-		return c.dockerVolumes(ctx, &r, a)
+		if a, ok := args.(contract.PageArgs); ok {
+			r.Data = &dockerobs.Page[dockerobs.VolumePayload]{Items: []dockerobs.VolumePayload{}}
+			return c.dockerVolumes(ctx, &r, a)
+		}
 	case "list_docker_networks":
-		return c.dockerNetworks(ctx, &r, a)
+		if a, ok := args.(contract.PageArgs); ok {
+			r.Data = &dockerobs.Page[dockerobs.NetworkPayload]{Items: []dockerobs.NetworkPayload{}}
+			return c.dockerNetworks(ctx, &r, a)
+		}
 	case "get_docker_disk_usage":
+		r.Data = &dockerobs.DiskUsagePayload{
+			Images:     []dockerobs.ImagePayload{},
+			Containers: []dockerobs.ContainerRefPayload{},
+			Volumes:    []dockerobs.VolumePayload{},
+		}
 		return c.dockerDiskUsage(ctx, &r)
 	case "query_docker_logs":
-		return c.dockerLogs(ctx, &r, a)
+		if a, ok := args.(contract.DockerLogsArgs); ok {
+			r.Data = &dockerobs.DockerLogPage{LogPagePayload: dockerobs.LogPagePayload{Entries: []dockerobs.LogRecord{}}}
+			return c.dockerLogs(ctx, &r, a)
+		}
 	default:
 		return contract.Failure("unsupported_operation")
 	}
+	return contract.Failure("invalid_arguments")
 }
 
 // dockerInfo projects the engine identity and capability state. Unsupported
@@ -363,20 +395,20 @@ func (c *Collector) dockerInfo(ctx context.Context, r *contract.Result) contract
 		r.Issue("docker_unavailable", r.Source, "observer returned no engine projection")
 		return *r
 	}
-	data := dockerobs.EngineInfoData(engine)
+	payload := dockerobs.ToEngineInfo(engine)
 	if len(engine.UnsupportedReasons) > 0 {
 		r.Error = true
 		r.Issue("unsupported_engine", r.Source, "engine mode unsupported: "+strings.Join(engine.UnsupportedReasons, ", "))
-		data["available"] = false
-		r.Data = data
+		payload.Available = false
+		r.Data = &payload
 		return *r
 	}
-	data["available"] = true
-	r.Data = data
+	payload.Available = true
+	r.Data = &payload
 	return *r
 }
 
-func (c *Collector) dockerContainers(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerContainers(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
 	response, e := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerList})
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
@@ -400,9 +432,9 @@ func (c *Collector) dockerContainers(ctx context.Context, r *contract.Result, a 
 		kept = append(kept, item)
 	}
 	dockerobs.SortContainerIDs(kept)
-	items := make([]map[string]any, 0, len(kept))
+	items := make([]dockerobs.ContainerPayload, 0, len(kept))
 	for i := range kept {
-		items = append(items, dockerobs.ContainerData(kept[i]))
+		items = append(items, dockerobs.ToContainer(kept[i]))
 	}
 	c.pagedProjects(r, a, items)
 	if filtered > 0 {
@@ -411,7 +443,7 @@ func (c *Collector) dockerContainers(ctx context.Context, r *contract.Result, a 
 	return *r
 }
 
-func (c *Collector) dockerContainer(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerContainer(ctx context.Context, r *contract.Result, a contract.ContainerArgs) contract.Result {
 	if a.Container == "" {
 		r.Error = true
 		r.Issue("invalid_selector", "", "one container selector is required")
@@ -444,11 +476,12 @@ func (c *Collector) dockerContainer(ctx context.Context, r *contract.Result, a c
 		r.Issue("identity_changed", a.Container, e.Error())
 		return *r
 	}
-	r.Data = dockerobs.ContainerDetailData(response.Detail)
+	detail := dockerobs.ToContainerDetail(response.Detail)
+	r.Data = &detail
 	return *r
 }
 
-func (c *Collector) dockerStats(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerStats(ctx context.Context, r *contract.Result, a contract.ContainerArgs) contract.Result {
 	if a.Container == "" {
 		r.Error = true
 		r.Issue("invalid_selector", "", "one container selector is required")
@@ -481,14 +514,15 @@ func (c *Collector) dockerStats(ctx context.Context, r *contract.Result, a contr
 		r.Issue("identity_changed", a.Container, e.Error())
 		return *r
 	}
-	r.Data = dockerobs.ContainerStatsData(response.Stats)
+	stats := dockerobs.ToContainerStats(response.Stats)
+	r.Data = &stats
 	if summary.State != "running" {
 		r.Issue("container_not_running", a.Container, fmt.Sprintf("observed state %q supplies no live sample", summary.State))
 	}
 	return *r
 }
 
-func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
 	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpImageList)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
@@ -516,9 +550,9 @@ func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a cont
 		r.Issue("non_atomic_observation", r.Source, "container references changed during collection; unused state is uncertain")
 	}
 	dockerobs.SortImageIDs(kept)
-	items := make([]map[string]any, 0, len(kept))
+	items := make([]dockerobs.ImagePayload, 0, len(kept))
 	for i := range kept {
-		items = append(items, dockerobs.ImageData(kept[i]))
+		items = append(items, dockerobs.ToImage(kept[i]))
 	}
 	c.pagedProjects(r, a, items)
 	if filtered > 0 {
@@ -527,7 +561,7 @@ func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a cont
 	return *r
 }
 
-func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
 	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpVolumeList)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
@@ -557,9 +591,9 @@ func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a con
 		r.Issue("non_atomic_observation", r.Source, "container references changed during collection; unused state is uncertain")
 	}
 	dockerobs.SortVolumeNames(kept)
-	items := make([]map[string]any, 0, len(kept))
+	items := make([]dockerobs.VolumePayload, 0, len(kept))
 	for i := range kept {
-		items = append(items, dockerobs.VolumeData(kept[i]))
+		items = append(items, dockerobs.ToVolume(kept[i]))
 	}
 	c.pagedProjects(r, a, items)
 	if filtered > 0 {
@@ -568,7 +602,7 @@ func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a con
 	return *r
 }
 
-func (c *Collector) dockerNetworks(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerNetworks(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
 	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpNetworkList)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
@@ -594,9 +628,9 @@ func (c *Collector) dockerNetworks(ctx context.Context, r *contract.Result, a co
 		r.Issue("non_atomic_observation", r.Source, "container references changed during collection; unused state is uncertain")
 	}
 	dockerobs.SortNetworkIDs(kept)
-	items := make([]map[string]any, 0, len(kept))
+	items := make([]dockerobs.NetworkPayload, 0, len(kept))
 	for i := range kept {
-		items = append(items, dockerobs.NetworkData(kept[i]))
+		items = append(items, dockerobs.ToNetwork(kept[i]))
 	}
 	c.pagedProjects(r, a, items)
 	if filtered > 0 {
@@ -709,8 +743,8 @@ func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) con
 		}
 	}
 	usage.Reclaimable = reclaimable
-	r.Data = dockerobs.DiskUsageData(usage)
-	r.Data["snapshot_consistent"] = false
+	usageData := dockerobs.ToDiskUsage(usage)
+	r.Data = &usageData
 	if !stable {
 		r.Issue("non_atomic_observation", r.Source, "docker changed during accounting; reclaimable estimates are non-atomic")
 	}
@@ -731,7 +765,7 @@ func containerByID(items []dockerobs.ContainerSummary, id string) (*dockerobs.Co
 
 // dockerLogs retrieves one bounded, non-following log window for one
 // policy-permitted container with explicit truncation and coverage gaps.
-func (c *Collector) dockerLogs(ctx context.Context, r *contract.Result, a contract.Args) contract.Result {
+func (c *Collector) dockerLogs(ctx context.Context, r *contract.Result, a contract.DockerLogsArgs) contract.Result {
 	if a.Container == "" {
 		r.Error = true
 		r.Issue("invalid_selector", "", "one container selector is required")
@@ -742,12 +776,12 @@ func (c *Collector) dockerLogs(ctx context.Context, r *contract.Result, a contra
 	if n == 0 {
 		n = l.LogEntries
 	}
-	if n < 1 || n > l.LogEntries || a.Offset != 0 || a.Format != "" || a.RawTail || a.Priority != nil {
+	if n < 1 || n > l.LogEntries {
 		r.Error = true
 		r.Issue("invalid_bounds", "", "container logs accept since, until, and limit within the entry ceiling")
 		return *r
 	}
-	since, until, e := window(a, l)
+	since, until, e := window(a.Since, a.Until, l)
 	if e != nil {
 		r.Error = true
 		r.Issue("invalid_window", "", e.Error())
@@ -806,10 +840,11 @@ func (c *Collector) dockerLogs(ctx context.Context, r *contract.Result, a contra
 	}
 	logs := response.Logs
 	r.Truncated = logs.Truncated
-	data := dockerobs.LogPageData(logs)
-	data["requested_since"] = since.Format(time.RFC3339Nano)
-	data["requested_until"] = until.Format(time.RFC3339Nano)
-	r.Data = data
+	r.Data = &dockerobs.DockerLogPage{
+		LogPagePayload: dockerobs.ToLogPage(logs),
+		RequestedSince: since.Format(time.RFC3339Nano),
+		RequestedUntil: until.Format(time.RFC3339Nano),
+	}
 	r.Source = "docker-observer:" + id
 	if summary.State != "running" && summary.State != "" {
 		r.Issue("container_not_running", a.Container, fmt.Sprintf("observed state %q; returned records are historical", summary.State))

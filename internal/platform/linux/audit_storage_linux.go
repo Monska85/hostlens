@@ -9,12 +9,14 @@ import (
 	"github.com/Monska85/hostlens/internal/contract"
 )
 
-func (c *Collector) auditStorage(ctx context.Context, r *contract.Result) {
+func (c *Collector) auditStorage(ctx context.Context, r *contract.Result) bool {
+	p := r.Data.(*contract.StorageInfo)
 	r.Source = "/proc/partitions,/proc/self/mountinfo,/proc/mdstat"
-	r.Data["scope"] = "kernel-visible block devices and diagnostics mount namespace; mount aliases are not separate capacity"
-	r.Data["snapshot_consistent"] = false
+	p.Scope = "kernel-visible block devices and diagnostics mount namespace; mount aliases are not separate capacity"
+	p.SnapshotConsistent = false
+	evidence := false
 	if b, ok := c.auditSystemRead(ctx, r, "/proc/partitions"); ok {
-		devices := []map[string]any{}
+		devices := []contract.DeviceRow{}
 		bad := false
 		for line := range strings.SplitSeq(string(b), "\n") {
 			if ctx.Err() != nil {
@@ -41,15 +43,16 @@ func (c *Collector) auditStorage(ctx context.Context, r *contract.Result) {
 				auditIssue(r, "inspection_limit", "/proc/partitions", "storage record limit reached")
 				break
 			}
-			devices = append(devices, map[string]any{"name": f[3], "major": major, "minor": minor, "blocks_1024": blocks})
+			devices = append(devices, contract.DeviceRow{Name: f[3], Major: uint32(major), Minor: uint32(minor), Blocks1024: blocks})
 		}
-		r.Data["devices"] = devices
+		p.Devices = devices
+		evidence = true
 		if bad {
 			auditIssue(r, "malformed_source", "/proc/partitions", "invalid block device records omitted")
 		}
 	}
 	if b, ok := c.auditSystemRead(ctx, r, "/proc/self/mountinfo"); ok {
-		mounts := []map[string]any{}
+		mounts := []contract.MountRow{}
 		bad := false
 		for line := range strings.SplitSeq(string(b), "\n") {
 			if ctx.Err() != nil {
@@ -85,15 +88,16 @@ func (c *Collector) auditStorage(ctx context.Context, r *contract.Result) {
 				auditIssue(r, "inspection_limit", "/proc/self/mountinfo", "storage record limit reached")
 				break
 			}
-			mounts = append(mounts, map[string]any{"mount_id": id, "parent_id": parent, "device": f[2], "mount": decodeMountField(f[4]), "filesystem": g[0], "flags": flags})
+			mounts = append(mounts, contract.MountRow{MountID: id, ParentID: parent, Device: f[2], Mount: decodeMountField(f[4]), Filesystem: g[0], Flags: flags})
 		}
-		r.Data["mounts"] = mounts
+		p.Mounts = mounts
+		evidence = true
 		if bad {
 			auditIssue(r, "malformed_source", "/proc/self/mountinfo", "invalid mount records omitted")
 		}
 	}
 	if b, ok := c.auditSystemRead(ctx, r, "/proc/mdstat"); ok {
-		arrays := []map[string]any{}
+		arrays := []contract.RaidArray{}
 		bad := false
 		for line := range strings.SplitSeq(string(b), "\n") {
 			if ctx.Err() != nil {
@@ -113,14 +117,16 @@ func (c *Collector) auditStorage(ctx context.Context, r *contract.Result) {
 				auditIssue(r, "inspection_limit", "/proc/mdstat", "storage record limit reached")
 				break
 			}
-			arrays = append(arrays, map[string]any{"name": f[0], "state": f[2]})
+			arrays = append(arrays, contract.RaidArray{Name: f[0], State: f[2]})
 		}
-		r.Data["software_raid_arrays"] = arrays
+		p.SoftwareRaidArrays = arrays
+		evidence = true
 		if bad {
 			auditIssue(r, "malformed_source", "/proc/mdstat", "unsupported array records omitted")
 		}
 	}
 	auditIssue(r, "evidence_unavailable", "storage", "device health, LVM topology, RAID redundancy/recovery and underlying virtual storage integrity are not established")
+	return evidence
 }
 
 func decodeMountField(s string) string {

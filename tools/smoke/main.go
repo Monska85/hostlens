@@ -63,6 +63,39 @@ func main() {
 		fmt.Println("HTTP listener: ready")
 		return
 	}
+	// Snapshot mode: TOKEN_JSON --list SNAPSHOT compares the installed
+	// candidate's discovery with the shipped contract snapshot byte for byte
+	// in canonical JSON form.
+	if len(os.Args) == 4 && os.Args[1] == "--list" {
+		secret, err := tokenSecret(os.Args[2])
+		if err != nil {
+			panic(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := compareSnapshot(ctx, endpoint, secret, os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("tools/list snapshot: passed")
+		return
+	}
+	// Reject mode: TOKEN_JSON --reject TOOL sends one unrelated argument and
+	// expects the gateway schema rejection before any backend contact.
+	if len(os.Args) == 4 && os.Args[1] == "--reject" {
+		secret, err := tokenSecret(os.Args[2])
+		if err != nil {
+			panic(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := rejectUnknown(ctx, endpoint, secret, os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("unknown-argument rejection: passed")
+		return
+	}
 	// list-tools mode: TOKEN_JSON list-tools PRESENT|ABSENT TOOL
 	if len(os.Args) == 5 && os.Args[2] == "list-tools" {
 		b, e := os.ReadFile(os.Args[1])
@@ -104,6 +137,129 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(os.Args[2] + ": passed")
+}
+
+func tokenSecret(tokenFile string) (string, error) {
+	b, e := os.ReadFile(tokenFile)
+	if e != nil {
+		return "", e
+	}
+	var token struct {
+		Secret string `json:"secret"`
+	}
+	if e = json.Unmarshal(b, &token); e != nil {
+		return "", e
+	}
+	return token.Secret, nil
+}
+
+// compareSnapshot requires every tool the installed candidate advertises to
+// exist, byte for byte in canonical JSON, in the shipped snapshot. The
+// snapshot is the full registry reference; a deployment may hide
+// capability-filtered tools, but no advertised tool may drift or be unknown.
+func compareSnapshot(ctx context.Context, endpoint, secret, snapshot string) error {
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	out, err := io.ReadAll(io.LimitReader(response.Body, 262144))
+	response.Body.Close()
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != 200 {
+		return fmt.Errorf("tools/list failed with HTTP %d", response.StatusCode)
+	}
+	var payload struct {
+		Result struct {
+			Tools []any `json:"tools"`
+		} `json:"result"`
+		Error any `json:"error"`
+	}
+	if err = json.Unmarshal(out, &payload); err != nil {
+		return fmt.Errorf("parse tools/list response (%d bytes): %w", len(out), err)
+	}
+	if payload.Error != nil {
+		return fmt.Errorf("tools/list returned an error: %v", payload.Error)
+	}
+	var shipped struct {
+		Tools []any `json:"tools"`
+	}
+	file, err := os.ReadFile(snapshot)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(file, &shipped); err != nil {
+		return err
+	}
+	reference := map[string][]byte{}
+	for _, def := range shipped.Tools {
+		entry, ok := def.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		reference[name] = mustMarshal(def)
+	}
+	if len(payload.Result.Tools) == 0 {
+		return fmt.Errorf("the installed candidate advertised no tools")
+	}
+	for _, def := range payload.Result.Tools {
+		entry, ok := def.(map[string]any)
+		if !ok {
+			return fmt.Errorf("unusable discovery entry")
+		}
+		name, _ := entry["name"].(string)
+		want, ok := reference[name]
+		if !ok {
+			return fmt.Errorf("installed candidate advertises %s, which the shipped snapshot does not declare", name)
+		}
+		if live := mustMarshal(def); !bytes.Equal(live, want) {
+			return fmt.Errorf("%s drifts from the definition shipped in %s: live %d canonical bytes vs shipped %d", name, snapshot, len(live), len(want))
+		}
+	}
+	return nil
+}
+
+func mustMarshal(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// rejectUnknown sends one argument the tool's schema does not declare and
+// requires the gateway to answer isError with invalid_arguments.
+func rejectUnknown(ctx context.Context, endpoint, secret, tool string) error {
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": map[string]any{"unrelated_argument": "x"}}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	out, err := io.ReadAll(io.LimitReader(response.Body, 262144))
+	response.Body.Close()
+	if err != nil {
+		return err
+	}
+	return checkResponse(out, response.StatusCode, tool, "invalid_arguments", true)
 }
 
 // listTools verifies that discovery carries or omits one tool name. Docker

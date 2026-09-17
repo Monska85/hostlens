@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,62 @@ func TestProtocolAndFailureAssertions(t *testing.T) {
 	}
 	if checkResponse([]byte(failure), http.StatusUnauthorized, "query_logs", "collection_failed", true) == nil {
 		t.Fatal("accepted unsuccessful HTTP status")
+	}
+}
+
+func TestSnapshotCompareAndUnknownArgumentRejection(t *testing.T) {
+	const tool = `{"name":"get_os_info","description":"observes","inputSchema":{"type":"object"},"outputSchema":{"type":"object","properties":{"data":{"type":"object"}}}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Method string `json:"method"`
+			Params struct {
+				Tool      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if request.Method == "tools/list" {
+			fmt.Fprintf(w, `{"result":{"tools":[%s,{"name":"get_inventory"}]}}`, tool)
+			return
+		}
+		fmt.Fprintf(w, `{"result":{"isError":true,"structuredContent":{"error":true,"issues":[{"code":"invalid_arguments","message":"unrelated_argument is not declared"}]}}}`)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	snapshot := t.TempDir() + "/tools.json"
+	if err := os.WriteFile(snapshot, []byte(`{"tools":[`+tool+`,{"name":"get_inventory"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := compareSnapshot(ctx, server.URL, "secret", snapshot); err != nil {
+		t.Fatal(err)
+	}
+	// Reordered members and whitespace must canonicalize to equality.
+	reordered := `{"tools":[{"outputSchema":{"properties":{"data":{"type":"object"}},"type":"object"},"inputSchema":{"type":"object"},"description":"observes","name":"get_os_info"},{"name":"get_inventory"}]}`
+	if err := os.WriteFile(snapshot, []byte(reordered), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := compareSnapshot(ctx, server.URL, "secret", snapshot); err != nil {
+		t.Fatal("canonical comparison rejected reordered members", err)
+	}
+	if err := os.WriteFile(snapshot, []byte(`{"tools":[{"name":"get_os_info"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := compareSnapshot(ctx, server.URL, "secret", snapshot); err == nil || !strings.Contains(err.Error(), "drifts from the definition") {
+		t.Fatal("altered snapshot accepted", err)
+	}
+	if err := os.WriteFile(snapshot, []byte(`{"tools":[{"name":"get_inventory"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := compareSnapshot(ctx, server.URL, "secret", snapshot); err == nil || !strings.Contains(err.Error(), "does not declare") {
+		t.Fatal("undeclared advertised tool accepted", err)
+	}
+	if err := rejectUnknown(ctx, server.URL, "secret", "get_os_info"); err != nil {
+		t.Fatal(err)
 	}
 }
 

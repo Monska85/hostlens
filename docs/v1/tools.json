@@ -1,0 +1,4674 @@
+{
+  "tools": [
+    {
+      "description": "Observe one policy-permitted container by stable identity: state, health, limits, mounts, and ports. Environment, commands, labels, and health output are excluded.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "container": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "container"
+        ],
+        "type": "object"
+      },
+      "name": "get_docker_container",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "cpu_period": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "cpu_quota": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "cpu_shares": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "created": {
+                "type": "string"
+              },
+              "endpoints": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "ip_address": {
+                      "type": "string"
+                    },
+                    "mac_address": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "finished_at": {
+                "type": "string"
+              },
+              "health": {
+                "type": "string"
+              },
+              "health_check": {
+                "type": "string"
+              },
+              "health_failing_streak": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "image_id": {
+                "type": "string"
+              },
+              "log_driver": {
+                "type": "string"
+              },
+              "memory_limit": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_swap": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "mounts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "destination": {
+                      "type": "string"
+                    },
+                    "rw": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "volume_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "destination"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "names": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "nano_cpus": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "network_mode": {
+                "type": "string"
+              },
+              "networks": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "oom_killed": {
+                "type": "boolean"
+              },
+              "pid": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "pids_limit": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "ports": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "host_ip": {
+                      "type": "string"
+                    },
+                    "private_port": {
+                      "maximum": 65535,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "public_port": {
+                      "maximum": 65535,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "private_port",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "restart_count": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "restart_policy": {
+                "type": "string"
+              },
+              "started_at": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "names",
+              "image_id",
+              "state"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe one point-in-time resource sample for a running container with the daemon-supplied counters and their exact scope.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "container": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "container"
+        ],
+        "type": "object"
+      },
+      "name": "get_docker_container_stats",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "block_read": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "block_write": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "cpu_percent": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "cpu_usage_total_ns": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_cache": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_limit": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_used": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "networks": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "rx_bytes": {
+                      "minimum": 0,
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "tx_bytes": {
+                      "minimum": 0,
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "online_cpus": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "pids_current": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "pids_limit": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "pre_system_cpu_usage_ns": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "precpu_usage_total_ns": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "preread": {
+                "type": "string"
+              },
+              "read": {
+                "type": "string"
+              },
+              "sample_scope": {
+                "type": "string"
+              },
+              "system_cpu_usage_ns": {
+                "minimum": 0,
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              }
+            },
+            "required": [
+              "read",
+              "sample_scope"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe daemon disk totals, per-resource sizes with shared-layer semantics, and advisory reclaimable estimates from the current unused analysis.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_docker_disk_usage",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "build_cache_records": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "build_cache_semantics": {
+                "type": "string"
+              },
+              "build_cache_size": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "containers": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "size_root_fs": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "size_rw": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "images": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "container_references": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "created": {
+                      "type": "string"
+                    },
+                    "currently_unused": {
+                      "type": "boolean"
+                    },
+                    "dangling": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "repo_digests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "repo_tags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "shared_size": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "size": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "layers_size": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "reclaimable": {
+                "additionalProperties": false,
+                "properties": {
+                  "advisory": {
+                    "type": "string"
+                  },
+                  "criteria": {
+                    "type": "string"
+                  },
+                  "dangling_image_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "observation_stable": {
+                    "type": "boolean"
+                  },
+                  "stopped_container_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "unused_image_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "unused_image_unique_bytes": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "unused_volume_bytes": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "unused_volume_names": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "observation_stable",
+                  "criteria",
+                  "advisory"
+                ],
+                "type": "object"
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              },
+              "volumes": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "anonymous": {
+                      "type": "boolean"
+                    },
+                    "container_references": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "created": {
+                      "type": "string"
+                    },
+                    "currently_unused": {
+                      "type": "boolean"
+                    },
+                    "driver": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "driver"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "images",
+              "containers",
+              "volumes",
+              "reclaimable",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe the enabled system-wide Docker engine identity, API scope, and capability state. Evidence is live and bounded; registry, proxy, plugin, and raw daemon configuration are excluded.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_docker_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "architecture": {
+                "type": "string"
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "cgroup_driver": {
+                "type": "string"
+              },
+              "cgroup_version": {
+                "type": "string"
+              },
+              "containers": {
+                "type": "integer"
+              },
+              "experimental": {
+                "type": "boolean"
+              },
+              "images": {
+                "type": "integer"
+              },
+              "kernel_version": {
+                "type": "string"
+              },
+              "logging_driver": {
+                "type": "string"
+              },
+              "min_api": {
+                "type": "string"
+              },
+              "negotiated_api": {
+                "type": "string"
+              },
+              "operating_system": {
+                "type": "string"
+              },
+              "os_type": {
+                "type": "string"
+              },
+              "paused": {
+                "type": "integer"
+              },
+              "running": {
+                "type": "integer"
+              },
+              "server_version": {
+                "type": "string"
+              },
+              "stopped": {
+                "type": "integer"
+              },
+              "storage_driver": {
+                "type": "string"
+              },
+              "supported_log_drivers": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "server_version",
+              "negotiated_api",
+              "min_api",
+              "operating_system",
+              "os_type",
+              "architecture",
+              "kernel_version",
+              "storage_driver",
+              "logging_driver",
+              "containers",
+              "running",
+              "paused",
+              "stopped",
+              "images",
+              "available"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Sample memory, swap, load, CPU utilization, filesystem capacity, and failed systemd services once; no history or trends.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_health_snapshot",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "checks": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "threshold": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "Critical": {
+                          "type": "number"
+                        },
+                        "Warning": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "Warning",
+                        "Critical"
+                      ],
+                      "type": [
+                        "null",
+                        "object"
+                      ]
+                    },
+                    "value": {
+                      "type": [
+                        "null",
+                        "number"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "cpu_availability_scope": {
+                "type": "string"
+              },
+              "cpu_sample_end": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "cpu_sample_start": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "cpu_utilization_percent": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "cpu_utilization_scope": {
+                "type": "string"
+              },
+              "excluded_filesystems": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "failed_services": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "filesystems": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "available_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "inode_used_percent": {
+                      "type": [
+                        "null",
+                        "number"
+                      ]
+                    },
+                    "mount": {
+                      "type": "string"
+                    },
+                    "total_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "used_percent": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "mount",
+                    "type",
+                    "total_bytes",
+                    "available_bytes",
+                    "used_percent"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "load_1_5_15": {
+                "items": {
+                  "type": "number"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "logical_cpus_available": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "memory_available_bytes": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "memory_total_bytes": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "missing_required": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "swap_total_bytes": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "swap_used_bytes": {
+                "type": [
+                  "null",
+                  "number"
+                ]
+              }
+            },
+            "required": [
+              "excluded_filesystems",
+              "checks",
+              "severity",
+              "complete",
+              "missing_required",
+              "scope"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Report HostLens's own active configuration: version, mode, privilege, limits, and policy fingerprint; requires the hostlens audit grant.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_hostlens_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "audit_domains": {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              "audit_successful_calls": {
+                "type": "boolean"
+              },
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "gid": {
+                "type": "integer"
+              },
+              "limits": {
+                "additionalProperties": false,
+                "properties": {
+                  "max_concurrent_operations": {
+                    "type": "integer"
+                  },
+                  "max_inspection_bytes": {
+                    "type": "integer"
+                  },
+                  "max_page_size": {
+                    "type": "integer"
+                  },
+                  "max_response_bytes": {
+                    "type": "integer"
+                  },
+                  "tool_timeout_ms": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "tool_timeout_ms",
+                  "max_concurrent_operations",
+                  "max_response_bytes",
+                  "max_inspection_bytes",
+                  "max_page_size"
+                ],
+                "type": "object"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "policy_fingerprint": {
+                "type": "string"
+              },
+              "privilege": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "server": {
+                "additionalProperties": false,
+                "properties": {
+                  "allow_insecure_http": {
+                    "type": "boolean"
+                  },
+                  "allowed_origin_count": {
+                    "type": "integer"
+                  },
+                  "bind": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "tls_enabled": {
+                    "type": "boolean"
+                  },
+                  "trusted_proxy_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "bind",
+                  "port",
+                  "tls_enabled",
+                  "allow_insecure_http",
+                  "trusted_proxy_count",
+                  "allowed_origin_count"
+                ],
+                "type": "object"
+              },
+              "uid": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "version",
+              "mode",
+              "privilege",
+              "uid",
+              "gid",
+              "policy_fingerprint",
+              "server",
+              "limits",
+              "audit_successful_calls",
+              "audit_domains"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read machine identity: OS facts, machine-id, and DMI product name and vendor; no serial numbers.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_inventory",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "machine_id": {
+                "type": "string"
+              },
+              "os": {
+                "additionalProperties": false,
+                "properties": {
+                  "architecture": {
+                    "type": "string"
+                  },
+                  "codename": {
+                    "type": "string"
+                  },
+                  "distribution": {
+                    "type": "string"
+                  },
+                  "family": {
+                    "type": "string"
+                  },
+                  "kernel": {
+                    "type": "string"
+                  },
+                  "product": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "family",
+                  "architecture",
+                  "kernel"
+                ],
+                "type": "object"
+              },
+              "product_name": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "system_vendor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "os",
+              "scope"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read procfs network tables for interfaces, addresses, routes, and sockets in this namespace; firewall rules are unavailable.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_network_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "interfaces": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "rx_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "rx_dropped": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "rx_errors": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "rx_packets": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "tx_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "tx_dropped": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "tx_errors": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "tx_packets": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "rx_bytes",
+                    "rx_packets",
+                    "rx_errors",
+                    "rx_dropped",
+                    "tx_bytes",
+                    "tx_packets",
+                    "tx_errors",
+                    "tx_dropped"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "ipv4_local_addresses": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "address"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "ipv4_routes": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "destination": {
+                      "type": "string"
+                    },
+                    "flags": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "gateway": {
+                      "type": "string"
+                    },
+                    "interface": {
+                      "type": "string"
+                    },
+                    "metric": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "netmask": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "interface",
+                    "destination",
+                    "gateway",
+                    "netmask",
+                    "flags",
+                    "metric"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "ipv6_addresses": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    },
+                    "flags": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "index": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "interface": {
+                      "type": "string"
+                    },
+                    "prefix": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "scope": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "address",
+                    "interface",
+                    "index",
+                    "prefix",
+                    "scope",
+                    "flags"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "ipv6_routes": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "destination": {
+                      "type": "string"
+                    },
+                    "destination_prefix": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "flags": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "gateway": {
+                      "type": "string"
+                    },
+                    "interface": {
+                      "type": "string"
+                    },
+                    "metric": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "source_prefix": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "interface",
+                    "destination",
+                    "source",
+                    "gateway",
+                    "destination_prefix",
+                    "source_prefix",
+                    "metric",
+                    "flags"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              },
+              "tcp4_listeners": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "inode": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "local_address": {
+                      "type": "string"
+                    },
+                    "local_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "remote_address": {
+                      "type": "string"
+                    },
+                    "remote_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "state_hex": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "local_address",
+                    "local_port",
+                    "remote_address",
+                    "remote_port",
+                    "state_hex",
+                    "uid",
+                    "inode"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tcp6_listeners": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "inode": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "local_address": {
+                      "type": "string"
+                    },
+                    "local_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "remote_address": {
+                      "type": "string"
+                    },
+                    "remote_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "state_hex": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "local_address",
+                    "local_port",
+                    "remote_address",
+                    "remote_port",
+                    "state_hex",
+                    "uid",
+                    "inode"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "udp4_endpoints": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "inode": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "local_address": {
+                      "type": "string"
+                    },
+                    "local_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "remote_address": {
+                      "type": "string"
+                    },
+                    "remote_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "state_hex": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "local_address",
+                    "local_port",
+                    "remote_address",
+                    "remote_port",
+                    "state_hex",
+                    "uid",
+                    "inode"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "udp6_endpoints": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "inode": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "local_address": {
+                      "type": "string"
+                    },
+                    "local_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "remote_address": {
+                      "type": "string"
+                    },
+                    "remote_port": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "state_hex": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "local_address",
+                    "local_port",
+                    "remote_address",
+                    "remote_port",
+                    "state_hex",
+                    "uid",
+                    "inode"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read the running host's OS release identity, architecture, and kernel from os-release and procfs; no hardware inventory.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_os_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "architecture": {
+                "type": "string"
+              },
+              "codename": {
+                "type": "string"
+              },
+              "distribution": {
+                "type": "string"
+              },
+              "family": {
+                "type": "string"
+              },
+              "kernel": {
+                "type": "string"
+              },
+              "product": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "family",
+              "architecture",
+              "kernel"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Inspect one visible process: identity, resource counters, credentials, executable path, and socket inodes; no memory contents.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "pid": {
+            "maximum": 4194304,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid"
+        ],
+        "type": "object"
+      },
+      "name": "get_process_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "process": {
+                "additionalProperties": false,
+                "properties": {
+                  "CapEff": {
+                    "type": "string"
+                  },
+                  "NoNewPrivs": {
+                    "type": "string"
+                  },
+                  "Seccomp": {
+                    "type": "string"
+                  },
+                  "executable": {
+                    "type": "string"
+                  },
+                  "gid": {
+                    "items": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "identity_rechecked": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "parent_pid": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "pid": {
+                    "type": "integer"
+                  },
+                  "resident_pages": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "socket_inodes": {
+                    "items": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "start_ticks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "system_cpu_ticks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "threads": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "uid": {
+                    "items": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "user_cpu_ticks": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "virtual_bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "pid",
+                  "name",
+                  "state",
+                  "parent_pid",
+                  "user_cpu_ticks",
+                  "system_cpu_ticks",
+                  "threads",
+                  "start_ticks",
+                  "virtual_bytes",
+                  "resident_pages",
+                  "identity_rechecked"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read selected kernel hardening controls and the active LSM list; does not establish workload confinement or secure boot.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_security_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "active_lsm": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "kernel_controls": {
+                "additionalProperties": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "kernel_controls"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read selected identity, load, and active state properties of one systemd unit via systemctl show.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "unit": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit"
+        ],
+        "type": "object"
+      },
+      "name": "get_service_status",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "ActiveState": {
+                "type": "string"
+              },
+              "Id": {
+                "type": "string"
+              },
+              "LoadState": {
+                "type": "string"
+              },
+              "MainPID": {
+                "type": "string"
+              },
+              "Result": {
+                "type": "string"
+              },
+              "SubState": {
+                "type": "string"
+              },
+              "UnitFileState": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read block devices, mount records, and software RAID state from procfs; no device health or LVM topology.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_storage_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "devices": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "blocks_1024": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "major": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "minor": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "major",
+                    "minor",
+                    "blocks_1024"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "mounts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device": {
+                      "type": "string"
+                    },
+                    "filesystem": {
+                      "type": "string"
+                    },
+                    "flags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "mount": {
+                      "type": "string"
+                    },
+                    "mount_id": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "parent_id": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "mount_id",
+                    "parent_id",
+                    "device",
+                    "mount",
+                    "filesystem",
+                    "flags"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              },
+              "software_raid_arrays": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Report cached apt and pacman repository metadata timestamps and expiry; no refresh or vulnerability assessment.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_update_info",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "repository_metadata": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "age_seconds": {
+                      "type": "number"
+                    },
+                    "expired": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "modified_at": {
+                      "type": "string"
+                    },
+                    "published_at": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "valid_until": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "modified_at",
+                    "age_seconds"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read metadata of one approved file or directory: ownership, mode, size, inode, links, and mtime; contents are never read.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "inspect_path",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "gid": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "inode": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "links": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "mtime_unix": {
+                "type": "integer"
+              },
+              "path": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "size_bytes": {
+                "type": "integer"
+              },
+              "type": {
+                "type": "string"
+              },
+              "uid": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "path",
+              "type",
+              "uid",
+              "gid",
+              "mode",
+              "size_bytes",
+              "inode",
+              "links",
+              "mtime_unix"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read selected effective systemd properties of one unit, including sandboxing directives; no health score or application state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "unit": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit"
+        ],
+        "type": "object"
+      },
+      "name": "inspect_service",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "service": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read local /etc/passwd and /etc/group accounts; excludes directory services, sudo or SSH authorization, and password state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_accounts",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "gid": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "home": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "members": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "shell": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "uid": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "snapshot_consistent",
+              "items"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe the current bounded container inventory with lifecycle, health, and reference evidence. Pagination is a new observation. Contents are untrusted data.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_docker_containers",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "cpu_period": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "cpu_quota": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "cpu_shares": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "created": {
+                      "type": "string"
+                    },
+                    "finished_at": {
+                      "type": "string"
+                    },
+                    "health": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "image": {
+                      "type": "string"
+                    },
+                    "image_id": {
+                      "type": "string"
+                    },
+                    "log_driver": {
+                      "type": "string"
+                    },
+                    "memory_limit": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "memory_swap": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "mounts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "destination": {
+                            "type": "string"
+                          },
+                          "rw": {
+                            "type": "boolean"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "volume_name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "destination"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "names": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "nano_cpus": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "networks": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "pids_limit": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "ports": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "host_ip": {
+                            "type": "string"
+                          },
+                          "private_port": {
+                            "maximum": 65535,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "public_port": {
+                            "maximum": 65535,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "private_port",
+                          "type"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "restart_count": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "restart_policy": {
+                      "type": "string"
+                    },
+                    "started_at": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "names",
+                    "image_id",
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe the bounded image inventory with deduplicated identities, shared-layer sizes, and current container references. Pagination is a new observation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_docker_images",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "container_references": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "created": {
+                      "type": "string"
+                    },
+                    "currently_unused": {
+                      "type": "boolean"
+                    },
+                    "dangling": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "repo_digests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "repo_tags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "shared_size": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "size": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe the bounded network inventory with selected non-secret configuration and current container references.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_docker_networks",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "container_references": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "driver": {
+                      "type": "string"
+                    },
+                    "enable_ipv6": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "internal": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "subnets": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe the bounded volume inventory with drivers, current references, and sizes only when the daemon supplies them.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_docker_volumes",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "anonymous": {
+                      "type": "boolean"
+                    },
+                    "container_references": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "created": {
+                      "type": "string"
+                    },
+                    "currently_unused": {
+                      "type": "boolean"
+                    },
+                    "driver": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "driver"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "List installed packages with versions from dpkg-query or pacman; no changelogs or file lists.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_packages",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Enumerate visible processes with identity and resource counters from procfs; processes hidden by permissions may be absent.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_processes",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "enumerated_processes": {
+                "type": "integer"
+              },
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "parent_pid": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "pid": {
+                      "type": "integer"
+                    },
+                    "resident_pages": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "start_ticks": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "system_cpu_ticks": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "threads": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "user_cpu_ticks": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "virtual_bytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "pid",
+                    "name",
+                    "state",
+                    "parent_pid",
+                    "user_cpu_ticks",
+                    "system_cpu_ticks",
+                    "threads",
+                    "start_ticks",
+                    "virtual_bytes",
+                    "resident_pages"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "observed_processes": {
+                "type": "integer"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "coverage_complete",
+              "scope",
+              "snapshot_consistent",
+              "enumerated_processes",
+              "observed_processes",
+              "items"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "List systemd service units with load, active, and sub states from systemctl; no unit file contents.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_services",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "active": {
+                      "type": "string"
+                    },
+                    "load": {
+                      "type": "string"
+                    },
+                    "sub": {
+                      "type": "string"
+                    },
+                    "unit": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "unit",
+                    "load",
+                    "active",
+                    "sub"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "snapshot_consistent": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "items",
+              "snapshot_consistent"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Observe bounded stdout and stderr records for one policy-permitted container with explicit truncation and rotation scope. Contents are untrusted data.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "container": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "since": {
+            "description": "Inclusive RFC3339 event timestamp",
+            "type": "string"
+          },
+          "until": {
+            "description": "Inclusive RFC3339 event timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "container"
+        ],
+        "type": "object"
+      },
+      "name": "query_docker_logs",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "earliest_returned_event": {
+                "type": "string"
+              },
+              "entries": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "stream": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "stream",
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "latest_returned_event": {
+                "type": "string"
+              },
+              "malformed_frames": {
+                "type": "integer"
+              },
+              "ordering": {
+                "type": "string"
+              },
+              "requested_since": {
+                "type": "string"
+              },
+              "requested_until": {
+                "type": "string"
+              },
+              "skipped_frames": {
+                "type": "integer"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "tty": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "entries",
+              "tty",
+              "ordering",
+              "requested_since",
+              "requested_until"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read one bounded window from one approved jsonl file or journal unit with timestamps, priority, and explicit coverage gaps; contents are untrusted data.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "path"
+            ]
+          },
+          {
+            "required": [
+              "unit"
+            ]
+          }
+        ],
+        "properties": {
+          "format": {
+            "description": "File parser: jsonl, or raw with raw_tail",
+            "type": "string"
+          },
+          "limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "priority": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "raw_tail": {
+            "type": "boolean"
+          },
+          "since": {
+            "description": "Inclusive RFC3339 event timestamp",
+            "type": "string"
+          },
+          "unit": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "until": {
+            "description": "Inclusive RFC3339 event timestamp",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "query_logs",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "coverage_complete": {
+                "type": "boolean"
+              },
+              "earliest_returned_event": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "entries": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "timestamp",
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "latest_returned_event": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "lines": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "ordering": {
+                "type": "string"
+              },
+              "parser": {
+                "type": "string"
+              },
+              "requested_since": {
+                "type": "string"
+              },
+              "requested_until": {
+                "type": "string"
+              },
+              "rotation_scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "requested_since",
+              "requested_until",
+              "coverage_complete"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "description": "Read one approved regular UTF-8 configuration file within the configured byte ceiling; contents are untrusted data.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read_config",
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "type": "object"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_offset": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observed_at"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

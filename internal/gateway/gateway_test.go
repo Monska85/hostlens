@@ -11,6 +11,7 @@ import (
 	"github.com/Monska85/hostlens/internal/backend"
 	"github.com/Monska85/hostlens/internal/config"
 	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/dockerobs"
 	"github.com/Monska85/hostlens/internal/policy"
 	"github.com/Monska85/hostlens/internal/token"
 	"io"
@@ -66,6 +67,69 @@ func TestListenerCleanupAndTLSFailure(t *testing.T) {
 
 type observedCollector struct{}
 
+// sampleData returns the zero-valued typed payload for one tool, the fixture
+// collectors return through the typed envelope. List pages carry empty slices
+// so required array members marshal as arrays, not nulls.
+func sampleData(tool string) any {
+	switch tool {
+	case "get_os_info":
+		return contract.OSInfo{}
+	case "get_inventory":
+		return contract.Inventory{}
+	case "get_health_snapshot":
+		return contract.HealthSnapshot{ExcludedFilesystems: []string{}, Checks: map[string]contract.HealthCheck{}}
+	case "list_services":
+		return contract.Page[contract.ServiceRow]{Items: []contract.ServiceRow{}}
+	case "get_service_status":
+		return contract.ServiceStatus{}
+	case "list_packages":
+		return contract.Page[contract.PackageRow]{Items: []contract.PackageRow{}}
+	case "query_logs":
+		return contract.LogPage{}
+	case "read_config":
+		return contract.ConfigFile{}
+	case "list_processes":
+		return contract.ProcessPage{Items: []contract.ProcessRow{}}
+	case "get_process_info":
+		return contract.ProcessInfo{}
+	case "get_network_info":
+		return contract.NetworkInfo{}
+	case "list_accounts":
+		return contract.AccountPage{Items: []contract.AccountRow{}}
+	case "get_storage_info":
+		return contract.StorageInfo{}
+	case "get_update_info":
+		return contract.UpdateInfo{}
+	case "get_security_info":
+		return contract.SecurityInfo{KernelControls: map[string]uint32{}}
+	case "get_hostlens_info":
+		return contract.HostlensInfo{Server: contract.HostlensServer{Bind: []string{}}, AuditDomains: map[string]bool{}}
+	case "inspect_service":
+		return contract.ServiceInspection{Service: map[string]string{}}
+	case "inspect_path":
+		return contract.PathInspection{}
+	case "get_docker_info":
+		return dockerobs.EngineInfoPayload{}
+	case "list_docker_containers":
+		return dockerobs.Page[dockerobs.ContainerPayload]{Items: []dockerobs.ContainerPayload{}}
+	case "get_docker_container":
+		return dockerobs.ContainerDetailPayload{ContainerPayload: dockerobs.ContainerPayload{Names: []string{}}}
+	case "get_docker_container_stats":
+		return dockerobs.ContainerStatsPayload{}
+	case "list_docker_images":
+		return dockerobs.Page[dockerobs.ImagePayload]{Items: []dockerobs.ImagePayload{}}
+	case "list_docker_volumes":
+		return dockerobs.Page[dockerobs.VolumePayload]{Items: []dockerobs.VolumePayload{}}
+	case "list_docker_networks":
+		return dockerobs.Page[dockerobs.NetworkPayload]{Items: []dockerobs.NetworkPayload{}}
+	case "get_docker_disk_usage":
+		return dockerobs.DiskUsagePayload{Images: []dockerobs.ImagePayload{}, Containers: []dockerobs.ContainerRefPayload{}, Volumes: []dockerobs.VolumePayload{}}
+	case "query_docker_logs":
+		return dockerobs.DockerLogPage{LogPagePayload: dockerobs.LogPagePayload{Entries: []dockerobs.LogRecord{}}}
+	}
+	return nil
+}
+
 func (observedCollector) Capabilities(context.Context) map[string]bool {
 	m := map[string]bool{}
 	for _, t := range contract.ToolNames() {
@@ -73,8 +137,8 @@ func (observedCollector) Capabilities(context.Context) map[string]bool {
 	}
 	return m
 }
-func (observedCollector) Collect(context.Context, string, contract.Args) contract.Result {
-	return contract.Result{ObservedAt: time.Now(), Data: map[string]any{"observed": 0}}
+func (observedCollector) Collect(_ context.Context, tool string, _ any) contract.Result {
+	return contract.Result{ObservedAt: time.Now(), Data: sampleData(tool)}
 }
 func TestMCPAuthorizationAndReload(t *testing.T) {
 	t.Parallel()
@@ -165,7 +229,7 @@ func TestEffectGateRejectsBeforeBackendAccess(t *testing.T) {
 		backendCalls.Add(1)
 		return nil, errors.New("unexpected backend access")
 	})}}
-	result, err := c.Call(context.Background(), "remembered_remediation", contract.Args{}, "request")
+	result, err := c.Call(context.Background(), "remembered_remediation", nil, "request")
 	if err == nil || !result.Error || result.Issues[0].Code != "operation_denied" || backendCalls.Load() != 0 {
 		t.Fatal("unclassified operation crossed authority boundary", result, err, backendCalls.Load())
 	}
@@ -426,7 +490,7 @@ type resultCollector struct {
 	result contract.Result
 }
 
-func (c resultCollector) Collect(context.Context, string, contract.Args) contract.Result {
+func (c resultCollector) Collect(context.Context, string, any) contract.Result {
 	return c.result
 }
 
@@ -440,7 +504,7 @@ func TestMCPExecutionErrorFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := backend.NewSnapshot(cfg, p)
-	result := contract.Result{Data: map[string]any{"observed": 0}}
+	result := contract.Result{Data: contract.OSInfo{}}
 	be := backend.New(snap, func() (backend.Snapshot, error) { return snap, nil }, func(backend.Snapshot) contract.Collector { return resultCollector{result: result} }, "be")
 	bs := httptest.NewServer(be.Handler())
 	defer bs.Close()
@@ -458,7 +522,7 @@ func TestMCPExecutionErrorFlags(t *testing.T) {
 	for _, code := range []string{"success", "coverage", "policy_denied", "source_denied_or_unavailable", "timeout", "overload", "backend_unavailable"} {
 		t.Run(code, func(t *testing.T) {
 			want := code != "success" && code != "coverage"
-			result = contract.Result{Data: map[string]any{"observed": 0}}
+			result = contract.Result{Data: contract.OSInfo{}}
 			if want {
 				result = contract.Failure(code)
 			} else if code != "success" {

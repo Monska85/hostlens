@@ -22,7 +22,7 @@ type schemaCollector struct{ calls *atomic.Int32 }
 func (s schemaCollector) Capabilities(ctx context.Context) map[string]bool {
 	return observedCollector{}.Capabilities(ctx)
 }
-func (s schemaCollector) Collect(ctx context.Context, tool string, args contract.Args) contract.Result {
+func (s schemaCollector) Collect(ctx context.Context, tool string, args any) contract.Result {
 	s.calls.Add(1)
 	return observedCollector{}.Collect(ctx, tool, args)
 }
@@ -75,6 +75,14 @@ func TestToolArgumentContracts(t *testing.T) {
 					Properties           map[string]any
 					AdditionalProperties bool
 				}
+				OutputSchema struct {
+					Required   []string
+					Properties struct {
+						Data struct {
+							Properties map[string]any
+						} `json:"data"`
+					}
+				} `json:"outputSchema"`
 			}
 		}
 	}
@@ -91,6 +99,14 @@ func TestToolArgumentContracts(t *testing.T) {
 		if strings.HasPrefix(tool.Name, "get_") && tool.Name != "get_service_status" && tool.Name != "get_process_info" && tool.Name != "get_docker_container" && tool.Name != "get_docker_container_stats" && len(tool.InputSchema.Properties) != 0 {
 			t.Fatal("observation tool advertises irrelevant arguments", tool.Name)
 		}
+		if len(tool.OutputSchema.Properties.Data.Properties) == 0 {
+			t.Fatal("output schema does not enumerate data members", tool.Name)
+		}
+		for _, member := range tool.OutputSchema.Required {
+			if member == "data" {
+				t.Fatal("output schema marks data required", tool.Name)
+			}
+		}
 	}
 	for _, tc := range []struct {
 		name, tool, args string
@@ -98,8 +114,10 @@ func TestToolArgumentContracts(t *testing.T) {
 	}{
 		{"audit process", "get_process_info", `{"pid":1}`, true},
 		{"audit process zero", "get_process_info", `{"pid":0}`, false},
+		{"audit process out of range", "get_process_info", `{"pid":4194305}`, false},
 		{"audit process missing", "get_process_info", `{}`, false},
 		{"audit injection", "get_network_info", `{"command":"id"}`, false},
+		{"audit unknown member", "get_process_info", `{"pid":1,"command":"id"}`, false},
 		{"audit path missing", "inspect_path", `{}`, false},
 		{"audit service missing", "inspect_service", `{}`, false},
 		{"empty observations", "get_os_info", `{}`, true},
@@ -129,10 +147,16 @@ func TestToolArgumentContracts(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls.Load()
+			requestsBefore := backendRequests.Load()
 			w := request("tools/call", map[string]any{"name": tc.tool, "arguments": json.RawMessage(tc.args)})
 			var response struct {
 				Error  any
-				Result struct{ IsError bool }
+				Result struct {
+					IsError    bool
+					Structured struct {
+						Issues []struct{ Code string } `json:"issues"`
+					} `json:"structuredContent"`
+				}
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
@@ -143,9 +167,19 @@ func TestToolArgumentContracts(t *testing.T) {
 			expected := before
 			if tc.accepted {
 				expected++
+				if backendRequests.Load() <= requestsBefore {
+					t.Fatal("accepted arguments never reached the backend")
+				}
+			} else {
+				if len(response.Result.Structured.Issues) == 0 || response.Result.Structured.Issues[0].Code != "invalid_arguments" {
+					t.Fatal("rejection lost the invalid_arguments issue", w.Body.String())
+				}
+				if backendRequests.Load() != requestsBefore {
+					t.Fatal("invalid arguments reached the backend", backendRequests.Load(), requestsBefore)
+				}
 			}
 			if calls.Load() != expected {
-				t.Fatal("invalid arguments reached collector", calls.Load(), expected)
+				t.Fatal("collector boundary crossed", calls.Load(), expected)
 			}
 		})
 	}
@@ -159,5 +193,28 @@ func TestToolArgumentContracts(t *testing.T) {
 	}
 	if strings.Contains(gatewayLogs.String(), unclassifiedMarker) {
 		t.Fatal("unclassified tool argument entered audit logs")
+	}
+	// Non-object argument JSON fails at the gateway with the same
+	// invalid_arguments issue and never reaches the backend.
+	raw := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_os_info","arguments":[1,2]}}`))
+	raw.Header.Set("Content-Type", "application/json")
+	raw.Header.Set("Accept", "application/json, text/event-stream")
+	raw.Header.Set("MCP-Protocol-Version", "2025-06-18")
+	raw.Header.Set("Authorization", "Bearer test")
+	w = httptest.NewRecorder()
+	c.Handler().ServeHTTP(w, raw)
+	var malformed struct {
+		Result struct {
+			IsError    bool
+			Structured struct {
+				Issues []struct{ Code string } `json:"issues"`
+			} `json:"structuredContent"`
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &malformed); err != nil || !malformed.Result.IsError || malformed.Result.Structured.Issues[0].Code != "invalid_arguments" {
+		t.Fatal("malformed arguments JSON escaped schema rejection", w.Body.String())
+	}
+	if backendRequests.Load() != requestsBefore || calls.Load() != before {
+		t.Fatal("malformed arguments JSON reached the backend")
 	}
 }

@@ -99,7 +99,7 @@ func TestObserverTransportSuccess(t *testing.T) {
 		t.Fatalf("decoded response lost content: %+v", response)
 	}
 	// The whole collection path must work through the same transport.
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
@@ -115,7 +115,7 @@ func TestObserverTransportHTTPRefusal(t *testing.T) {
 	if e == nil || !strings.Contains(e.Error(), "observer rejected observation (400)") {
 		t.Fatalf("HTTP refusal lost: %v", e)
 	}
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if !result.Error || result.Issues[0].Code != "docker_unavailable" {
 		t.Fatalf("HTTP refusal must surface as unavailable: %+v", result.Issues)
 	}
@@ -126,7 +126,7 @@ func TestObserverTransportConnectionRefused(t *testing.T) {
 
 	dead := filepath.Join(t.TempDir(), "dead.sock")
 	c := transportCollector(t, NewObserverClient(dead))
-	result := c.Collect(context.Background(), "list_docker_containers", contract.Args{})
+	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
 	if !result.Error || result.Issues[0].Code != "docker_unavailable" {
 		t.Fatalf("dead socket must surface as docker_unavailable: %+v", result.Issues)
 	}
@@ -156,7 +156,7 @@ func TestObserverTransportContextCancellation(t *testing.T) {
 	o.set("slow")
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	result := c.Collect(ctx, "list_docker_containers", contract.Args{})
+	result := c.Collect(ctx, "list_docker_containers", contract.PageArgs{})
 	if !result.Error || result.Issues[0].Code != "cancelled_or_timeout" {
 		t.Fatalf("cancellation must surface as cancelled_or_timeout: %+v", result.Issues)
 	}
@@ -184,7 +184,7 @@ func TestDockerStatsBranches(t *testing.T) {
 			dockerobs.OpContainerStats: {Stats: stats},
 		},
 	})
-	result := c.Collect(context.Background(), "get_docker_container_stats", contract.Args{Container: "web"})
+	result := c.Collect(context.Background(), "get_docker_container_stats", contract.ContainerArgs{Container: "web"})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
@@ -207,7 +207,7 @@ func TestDockerStatsBranches(t *testing.T) {
 			dockerobs.OpContainerStats: {},
 		},
 	})
-	result = c.Collect(context.Background(), "get_docker_container_stats", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "get_docker_container_stats", contract.ContainerArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "docker_unavailable" {
 		t.Fatalf("nil stats must fail closed: %+v", result.Issues)
 	}
@@ -230,7 +230,7 @@ func TestDockerStatsBranches(t *testing.T) {
 			dockerobs.OpContainerStats: {Stats: stats},
 		},
 	})
-	result = c.Collect(context.Background(), "get_docker_container_stats", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "get_docker_container_stats", contract.ContainerArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "identity_changed" {
 		t.Fatalf("identity recheck failure lost: %+v", result.Issues)
 	}
@@ -241,7 +241,7 @@ func TestDockerStatsBranches(t *testing.T) {
 			return []dockerobs.ContainerSummary{summary(runningID, "web", "running")}
 		},
 	})
-	result = c.Collect(context.Background(), "get_docker_container_stats", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "get_docker_container_stats", contract.ContainerArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "policy_denied" {
 		t.Fatalf("specific denial must win: %+v", result.Issues)
 	}
@@ -256,7 +256,7 @@ func TestDockerStatsBranches(t *testing.T) {
 			dockerobs.OpDiskUsage: {Usage: usage},
 		},
 	})
-	result = c.Collect(context.Background(), "get_docker_disk_usage", contract.Args{})
+	result = c.Collect(context.Background(), "get_docker_disk_usage", contract.NoArgs{})
 	if !result.Error || result.Issues[0].Code != "policy_denied" {
 		t.Fatalf("ungranted disk usage must stay denied: %+v", result.Issues)
 	}
@@ -274,16 +274,19 @@ func TestDockerLogsBranches(t *testing.T) {
 		},
 	}
 	c := collectorWith(t, []string{"logs/*"}, nil, observer)
-	if result := c.Collect(context.Background(), "query_docker_logs", contract.Args{}); !result.Error || result.Issues[0].Code != "invalid_selector" {
+	if result := c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{}); !result.Error || result.Issues[0].Code != "invalid_selector" {
 		t.Fatalf("missing selector accepted: %+v", result.Issues)
 	}
-	if result := c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web", RawTail: true}); !result.Error || result.Issues[0].Code != "invalid_bounds" {
-		t.Fatalf("tail-mode logs accepted: %+v", result.Issues)
+	// File-shaped members (raw_tail) no longer exist on the typed log
+	// arguments; the gateway schema rejects them, and a wrong-typed argument
+	// struct still fails closed here.
+	if result := c.Collect(context.Background(), "query_docker_logs", contract.ContainerArgs{Container: "web"}); !result.Error || result.Issues[0].Code != "invalid_arguments" {
+		t.Fatalf("file-shaped log arguments accepted: %+v", result.Issues)
 	}
-	if result := c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web", Since: "bogus"}); !result.Error || result.Issues[0].Code != "invalid_window" {
+	if result := c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web", Since: "bogus"}); !result.Error || result.Issues[0].Code != "invalid_window" {
 		t.Fatalf("bogus window accepted: %+v", result.Issues)
 	}
-	result := c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result := c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
@@ -298,7 +301,7 @@ func TestDockerLogsBranches(t *testing.T) {
 	observer.containers = func() []dockerobs.ContainerSummary {
 		return []dockerobs.ContainerSummary{summary(runningID, "web", "exited")}
 	}
-	result = c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	historical := false
 	for _, issue := range result.Issues {
 		if issue.Code == "container_not_running" {
@@ -311,7 +314,7 @@ func TestDockerLogsBranches(t *testing.T) {
 
 	// Missing projection fails closed.
 	observer.responses[dockerobs.OpContainerLogs] = dockerobs.Response{}
-	result = c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "docker_unavailable" {
 		t.Fatalf("nil logs accepted: %+v", result.Issues)
 	}
@@ -329,7 +332,7 @@ func TestDockerLogsBranches(t *testing.T) {
 		return []dockerobs.ContainerSummary{summary(removedID, "web", "running")}
 	}
 	observer.responses[dockerobs.OpContainerLogs] = dockerobs.Response{Logs: logs}
-	result = c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "identity_changed" {
 		t.Fatalf("identity recheck lost: %+v", result.Issues)
 	}
@@ -339,14 +342,14 @@ func TestDockerLogsBranches(t *testing.T) {
 		return []dockerobs.ContainerSummary{summary(runningID, "web", "running")}
 	}
 	observer.responses[dockerobs.OpContainerLogs] = dockerobs.Response{Failed: true, Issue: "unsupported_driver", Reason: "driver unsupported"}
-	result = c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "driver_gap" {
 		t.Fatalf("driver gap lost: %+v", result.Issues)
 	}
 
 	// Not-found observations stay bounded gaps.
 	observer.responses[dockerobs.OpContainerLogs] = dockerobs.Response{Failed: true, Issue: "not_found", Reason: "engine resource not found"}
-	result = c.Collect(context.Background(), "query_docker_logs", contract.Args{Container: "web"})
+	result = c.Collect(context.Background(), "query_docker_logs", contract.DockerLogsArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "not_found" {
 		t.Fatalf("not-found gap lost: %+v", result.Issues)
 	}

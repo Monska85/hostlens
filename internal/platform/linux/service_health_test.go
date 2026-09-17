@@ -36,17 +36,17 @@ func TestHealthUsesAllServiceObservationsAndPreservesPartialFailures(t *testing.
 				c.Policy.Rules = append(c.Policy.Rules, policy.Rule{Category: "journal", Pattern: "private.service", Deny: true})
 			}
 			c.Runner = &fakeRunner{out: "good.service loaded active running\nfailed.service loaded failed failed\n" + tc.suffix}
-			listed := c.Collect(context.Background(), "list_services", contract.Args{})
+			listed := c.Collect(context.Background(), "list_services", contract.PageArgs{})
 			if listed.NextOffset == nil {
 				t.Fatal("public pagination was removed")
 			}
-			r := c.Collect(context.Background(), "get_health_snapshot", contract.Args{})
-			if r.Data["severity"] != "warning" || r.Data["complete"] != tc.complete || !reflect.DeepEqual(r.Data["failed_services"], []string{"failed.service"}) {
+			r := c.Collect(context.Background(), "get_health_snapshot", contract.NoArgs{})
+			snap, ok := r.Data.(contract.HealthSnapshot)
+			if !ok || snap.Severity != "warning" || snap.Complete != tc.complete || !reflect.DeepEqual(snap.FailedServices, []string{"failed.service"}) {
 				t.Fatalf("lost observed failure: %+v", r)
 			}
-			checks := r.Data["checks"].(map[string]any)
-			if checks["services"].(map[string]any)["status"] != "warning" {
-				t.Fatalf("partial coverage erased observed check: %+v", checks)
+			if snap.Checks["services"].Status != "warning" {
+				t.Fatalf("partial coverage erased observed check: %+v", snap.Checks)
 			}
 			if len(r.Issues) > 10 {
 				t.Fatal("malformed service issues are unbounded")
@@ -68,9 +68,9 @@ func TestHealthMountDecodingAndControlSkips(t *testing.T) {
 	escaped := strings.ReplaceAll(mount, "\n", `\012`)
 	fixtureOK(t, os.WriteFile(filepath.Join(root, "proc/self/mounts"), []byte("device "+escaped+" ext4 rw 0 0\n"), 0644))
 	c.Runner = &fakeRunner{}
-	r := c.Collect(context.Background(), "get_health_snapshot", contract.Args{})
-	filesystems, ok := r.Data["filesystems"].([]map[string]any)
-	if !ok || len(filesystems) != 1 || filesystems[0]["mount"] != mount || r.Data["complete"] != true {
+	r := c.Collect(context.Background(), "get_health_snapshot", contract.NoArgs{})
+	snap, ok := r.Data.(contract.HealthSnapshot)
+	if !ok || len(snap.Filesystems) != 1 || snap.Filesystems[0].Mount != mount || !snap.Complete {
 		t.Fatalf("escaped native mount was not observed: %+v", r)
 	}
 	// Control mounts are skipped without hiding real storage.
@@ -89,9 +89,9 @@ func TestHealthMountDecodingAndControlSkips(t *testing.T) {
 				mounts += "device " + filepath.Join(root, "missing") + " ext4 rw 0 0\n"
 			}
 			fixtureOK(t, os.WriteFile(filepath.Join(root, "proc/self/mounts"), []byte(mounts), 0644))
-			r := c.Collect(context.Background(), "get_health_snapshot", contract.Args{})
-			filesystems, ok := r.Data["filesystems"].([]map[string]any)
-			if !ok || len(filesystems) != 1 || filesystems[0]["mount"] != root || r.Data["complete"] != !missingStorage {
+			r := c.Collect(context.Background(), "get_health_snapshot", contract.NoArgs{})
+			snap, ok := r.Data.(contract.HealthSnapshot)
+			if !ok || len(snap.Filesystems) != 1 || snap.Filesystems[0].Mount != root || snap.Complete != !missingStorage {
 				t.Fatalf("incorrect storage coverage: %+v", r)
 			}
 			for _, issue := range r.Issues {

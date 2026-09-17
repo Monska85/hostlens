@@ -45,12 +45,12 @@ func procEndpoint(s string) (string, uint64, error) {
 	n, e := strconv.ParseUint(port, 16, 16)
 	return ip, n, e
 }
-func parseSockets(b []byte, tcp bool) ([]map[string]any, error) {
+func parseSockets(b []byte, tcp bool) ([]contract.SocketRow, error) {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if len(lines) == 0 || !strings.Contains(lines[0], "local_address") {
 		return nil, errors.New("missing socket table header")
 	}
-	out := []map[string]any{}
+	out := []contract.SocketRow{}
 	for _, line := range lines[1:] {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -82,19 +82,19 @@ func parseSockets(b []byte, tcp bool) ([]map[string]any, error) {
 		if e != nil {
 			return nil, e
 		}
-		out = append(out, map[string]any{"local_address": ip, "local_port": port, "remote_address": remote, "remote_port": rport, "state_hex": f[3], "uid": uid, "inode": inode})
+		out = append(out, contract.SocketRow{LocalAddress: ip, LocalPort: port, RemoteAddress: remote, RemotePort: rport, StateHex: f[3], UID: uint32(uid), Inode: inode})
 		if len(out) > auditMaxEntries {
 			return nil, errors.New("socket entry limit exceeded")
 		}
 	}
 	return out, nil
 }
-func parseIPv4Routes(b []byte) ([]map[string]any, error) {
+func parseIPv4Routes(b []byte) ([]contract.IPv4Route, error) {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if !strings.HasPrefix(lines[0], "Iface") {
 		return nil, errors.New("missing route table header")
 	}
-	out := []map[string]any{}
+	out := []contract.IPv4Route{}
 	for _, line := range lines[1:] {
 		f := strings.Fields(line)
 		if len(f) == 0 {
@@ -123,15 +123,15 @@ func parseIPv4Routes(b []byte) ([]map[string]any, error) {
 		if e != nil {
 			return nil, e
 		}
-		out = append(out, map[string]any{"interface": f[0], "destination": dest, "gateway": gateway, "netmask": mask, "flags": flags, "metric": metric})
+		out = append(out, contract.IPv4Route{Interface: f[0], Destination: dest, Gateway: gateway, Netmask: mask, Flags: uint32(flags), Metric: uint32(metric)})
 		if len(out) > auditMaxEntries {
 			return nil, errors.New("route entry limit exceeded")
 		}
 	}
 	return out, nil
 }
-func parseIPv6Routes(b []byte) ([]map[string]any, error) {
-	out := []map[string]any{}
+func parseIPv6Routes(b []byte) ([]contract.IPv6Route, error) {
+	out := []contract.IPv6Route{}
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
 		if len(f) == 0 {
@@ -140,7 +140,7 @@ func parseIPv6Routes(b []byte) ([]map[string]any, error) {
 		if len(f) != 10 {
 			return nil, errors.New("invalid IPv6 route")
 		}
-		row := map[string]any{"interface": f[9]}
+		row := contract.IPv6Route{Interface: f[9]}
 		for _, v := range []struct {
 			k string
 			i int
@@ -152,7 +152,14 @@ func parseIPv6Routes(b []byte) ([]map[string]any, error) {
 			if e != nil {
 				return nil, e
 			}
-			row[v.k] = s
+			switch v.k {
+			case "destination":
+				row.Destination = s
+			case "source":
+				row.Source = s
+			case "gateway":
+				row.Gateway = s
+			}
 		}
 		for _, v := range []struct {
 			k string
@@ -162,7 +169,16 @@ func parseIPv6Routes(b []byte) ([]map[string]any, error) {
 			if e != nil || ((v.i == 1 || v.i == 3) && n > 128) {
 				return nil, errors.New("invalid IPv6 route value")
 			}
-			row[v.k] = n
+			switch v.k {
+			case "destination_prefix":
+				row.DestinationPrefix = uint32(n)
+			case "source_prefix":
+				row.SourcePrefix = uint32(n)
+			case "metric":
+				row.Metric = uint32(n)
+			case "flags":
+				row.Flags = uint32(n)
+			}
 		}
 		out = append(out, row)
 		if len(out) > auditMaxEntries {
@@ -171,12 +187,12 @@ func parseIPv6Routes(b []byte) ([]map[string]any, error) {
 	}
 	return out, nil
 }
-func parseInterfaces(b []byte) ([]map[string]any, error) {
+func parseInterfaces(b []byte) ([]contract.InterfaceRow, error) {
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	if len(lines) < 2 || !strings.Contains(lines[1], "bytes") {
 		return nil, errors.New("invalid interface header")
 	}
-	out := []map[string]any{}
+	out := []contract.InterfaceRow{}
 	for _, line := range lines[2:] {
 		name, values, ok := strings.Cut(line, ":")
 		if !ok {
@@ -186,7 +202,7 @@ func parseInterfaces(b []byte) ([]map[string]any, error) {
 		if len(f) != 16 {
 			return nil, errors.New("invalid interface counters")
 		}
-		row := map[string]any{"name": strings.TrimSpace(name)}
+		row := contract.InterfaceRow{Name: strings.TrimSpace(name)}
 		for _, v := range []struct {
 			k string
 			i int
@@ -195,7 +211,24 @@ func parseInterfaces(b []byte) ([]map[string]any, error) {
 			if e != nil {
 				return nil, e
 			}
-			row[v.k] = n
+			switch v.k {
+			case "rx_bytes":
+				row.RxBytes = n
+			case "rx_packets":
+				row.RxPackets = n
+			case "rx_errors":
+				row.RxErrors = n
+			case "rx_dropped":
+				row.RxDropped = n
+			case "tx_bytes":
+				row.TxBytes = n
+			case "tx_packets":
+				row.TxPackets = n
+			case "tx_errors":
+				row.TxErrors = n
+			case "tx_dropped":
+				row.TxDropped = n
+			}
 		}
 		out = append(out, row)
 		if len(out) > auditMaxEntries {
@@ -204,8 +237,8 @@ func parseInterfaces(b []byte) ([]map[string]any, error) {
 	}
 	return out, nil
 }
-func parseIPv6Addresses(b []byte) ([]map[string]any, error) {
-	out := []map[string]any{}
+func parseIPv6Addresses(b []byte) ([]contract.IPv6Address, error) {
+	out := []contract.IPv6Address{}
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
 		if len(f) == 0 {
@@ -221,7 +254,7 @@ func parseIPv6Addresses(b []byte) ([]map[string]any, error) {
 		if e != nil {
 			return nil, e
 		}
-		row := map[string]any{"address": ip, "interface": f[5]}
+		row := contract.IPv6Address{Address: ip, Interface: f[5]}
 		for _, v := range []struct {
 			k string
 			i int
@@ -230,7 +263,16 @@ func parseIPv6Addresses(b []byte) ([]map[string]any, error) {
 			if e != nil || (v.i == 2 && n > 128) {
 				return nil, errors.New("invalid IPv6 address attribute")
 			}
-			row[v.k] = n
+			switch v.k {
+			case "index":
+				row.Index = uint32(n)
+			case "prefix":
+				row.Prefix = uint32(n)
+			case "scope":
+				row.Scope = uint32(n)
+			case "flags":
+				row.Flags = uint32(n)
+			}
 		}
 		out = append(out, row)
 		if len(out) > auditMaxEntries {
@@ -239,7 +281,7 @@ func parseIPv6Addresses(b []byte) ([]map[string]any, error) {
 	}
 	return out, nil
 }
-func parseIPv4Local(b []byte) ([]map[string]any, error) {
+func parseIPv4Local(b []byte) ([]contract.IPv4LocalAddress, error) {
 	lines := strings.Split(string(b), "\n")
 	seen := map[string]bool{}
 	for i, line := range lines {
@@ -270,43 +312,115 @@ func parseIPv4Local(b []byte) ([]map[string]any, error) {
 		keys = append(keys, s)
 	}
 	sort.Strings(keys)
-	out := []map[string]any{}
+	out := []contract.IPv4LocalAddress{}
 	for _, s := range keys {
-		out = append(out, map[string]any{"address": s})
+		out = append(out, contract.IPv4LocalAddress{Address: s})
 	}
 	return out, nil
 }
-func (c *Collector) auditNetwork(ctx context.Context, r *contract.Result) {
+func (c *Collector) auditNetwork(ctx context.Context, r *contract.Result) bool {
+	p := r.Data.(*contract.NetworkInfo)
 	r.Source = "procfs network tables"
-	r.Data["scope"] = "collector network namespace; non-atomic observations"
-	r.Data["snapshot_consistent"] = false
+	p.Scope = "collector network namespace; non-atomic observations"
+	p.SnapshotConsistent = false
+	evidence := false
 	parsers := []struct {
-		path, key string
-		parse     func([]byte) ([]map[string]any, error)
+		path   string
+		assign func([]byte) error
 	}{
-		{"/proc/net/dev", "interfaces", parseInterfaces}, {"/proc/net/if_inet6", "ipv6_addresses", parseIPv6Addresses}, {"/proc/net/fib_trie", "ipv4_local_addresses", parseIPv4Local}, {"/proc/net/route", "ipv4_routes", parseIPv4Routes}, {"/proc/net/ipv6_route", "ipv6_routes", parseIPv6Routes},
-		{"/proc/net/tcp", "tcp4_listeners", func(b []byte) ([]map[string]any, error) { return parseSockets(b, true) }}, {"/proc/net/tcp6", "tcp6_listeners", func(b []byte) ([]map[string]any, error) { return parseSockets(b, true) }}, {"/proc/net/udp", "udp4_endpoints", func(b []byte) ([]map[string]any, error) { return parseSockets(b, false) }}, {"/proc/net/udp6", "udp6_endpoints", func(b []byte) ([]map[string]any, error) { return parseSockets(b, false) }},
+		{"/proc/net/dev", func(b []byte) error {
+			rows, e := parseInterfaces(b)
+			if e != nil {
+				return e
+			}
+			p.Interfaces = rows
+			return nil
+		}},
+		{"/proc/net/if_inet6", func(b []byte) error {
+			rows, e := parseIPv6Addresses(b)
+			if e != nil {
+				return e
+			}
+			p.IPv6Addresses = rows
+			return nil
+		}},
+		{"/proc/net/fib_trie", func(b []byte) error {
+			rows, e := parseIPv4Local(b)
+			if e != nil {
+				return e
+			}
+			p.IPv4LocalAddresses = rows
+			return nil
+		}},
+		{"/proc/net/route", func(b []byte) error {
+			rows, e := parseIPv4Routes(b)
+			if e != nil {
+				return e
+			}
+			p.IPv4Routes = rows
+			return nil
+		}},
+		{"/proc/net/ipv6_route", func(b []byte) error {
+			rows, e := parseIPv6Routes(b)
+			if e != nil {
+				return e
+			}
+			p.IPv6Routes = rows
+			return nil
+		}},
+		{"/proc/net/tcp", func(b []byte) error {
+			rows, e := parseSockets(b, true)
+			if e != nil {
+				return e
+			}
+			p.TCP4Listeners = rows
+			return nil
+		}},
+		{"/proc/net/tcp6", func(b []byte) error {
+			rows, e := parseSockets(b, true)
+			if e != nil {
+				return e
+			}
+			p.TCP6Listeners = rows
+			return nil
+		}},
+		{"/proc/net/udp", func(b []byte) error {
+			rows, e := parseSockets(b, false)
+			if e != nil {
+				return e
+			}
+			p.UDP4Endpoints = rows
+			return nil
+		}},
+		{"/proc/net/udp6", func(b []byte) error {
+			rows, e := parseSockets(b, false)
+			if e != nil {
+				return e
+			}
+			p.UDP6Endpoints = rows
+			return nil
+		}},
 	}
-	for _, p := range parsers {
+	for _, parser := range parsers {
 		if ctx.Err() != nil {
-			return
+			return evidence
 		}
 		if c.auditBudgetExhausted() {
 			r.Truncated = true
-			auditIssue(r, "inspection_limit", p.path, "aggregate network input limit reached")
+			auditIssue(r, "inspection_limit", parser.path, "aggregate network input limit reached")
 			break
 		}
-		b, ok := c.auditRead(r, p.path)
+		b, ok := c.auditRead(r, parser.path)
 		if !ok {
 			continue
 		}
-		rows, e := p.parse(b)
-		if e != nil {
-			auditIssue(r, "malformed_source", p.path, e.Error())
+		if e := parser.assign(b); e != nil {
+			auditIssue(r, "malformed_source", parser.path, e.Error())
 			continue
 		}
-		r.Data[p.key] = rows
+		evidence = true
 	}
 	auditIssue(r, "unavailable_interface", "firewall", "active firewall rules require interfaces unavailable under the existing diagnostics sandbox")
 	auditIssue(r, "partial_observation", "network", "IPv4 addresses lack interface association; procfs routes omit policy routing rules and additional IPv4 tables; socket inode ownership requires separately authorized process inspection")
+	return evidence
 }

@@ -326,7 +326,7 @@ func TestMetricsBackendFailuresAndGenerationIsolation(t *testing.T) {
 		t.Fatal("generation blocked telemetry")
 	}
 	waitScrape(t, c)
-	if result, err := c.Call(context.Background(), "get_os_info", contract.Args{}, "id"); err == nil || !result.Error {
+	if result, err := c.Call(context.Background(), "get_os_info", nil, "id"); err == nil || !result.Error {
 		t.Fatal("diagnostics bypassed generation")
 	}
 	for _, body := range []string{`[{"name":"hostlens_process_start_time_seconds","type":1,"metric":[{"label":[{"name":"component","value":"backend"}],"gauge":{}}]}]`, "invalid", "[]", strings.Repeat("x", telemetry.MaxBytes+1)} {

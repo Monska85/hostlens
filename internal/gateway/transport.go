@@ -28,7 +28,8 @@ type mcpEnvelope struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
 	Params struct {
-		Name string `json:"name"`
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
 	} `json:"params"`
 }
 
@@ -76,6 +77,50 @@ func writeToolDenial(w http.ResponseWriter, message mcpEnvelope) {
 		"error": map[string]any{
 			"code":    -32600,
 			"message": "authorization denied",
+		},
+	})
+}
+
+// invalidToolCall returns the first admitted tools/call whose arguments fail
+// the tool's resolved input schema. Denials are handled by deniedToolCall; this
+// pass runs after it so authorization still wins over argument validation.
+func invalidToolCall(payload []byte, roles []string, readOnly bool) (mcpEnvelope, bool) {
+	messages, err := mcpEnvelopes(payload)
+	if err != nil {
+		return mcpEnvelope{}, false
+	}
+	for _, message := range messages {
+		if message.Method != "tools/call" {
+			continue
+		}
+		definition, known := contract.Tool(message.Params.Name)
+		if !toolAdmitted(definition, known, readOnly) || !token.Allows(roles, message.Params.Name) {
+			continue
+		}
+		if err := validateInput(definition.Name, message.Params.Arguments); err != nil {
+			return message, true
+		}
+	}
+	return mcpEnvelope{}, false
+}
+
+// writeInvalidArguments answers with a tool-level error result carrying the
+// invalid_arguments issue, before any backend contact or token re-verification.
+func writeInvalidArguments(w http.ResponseWriter, message mcpEnvelope) {
+	id := message.ID
+	if len(id) == 0 {
+		id = json.RawMessage("null")
+	}
+	failure := contract.Failure("invalid_arguments")
+	payload, _ := json.Marshal(failure)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result": map[string]any{
+			"isError":           true,
+			"content":           []map[string]string{{"type": "text", "text": string(payload)}},
+			"structuredContent": failure,
 		},
 	})
 }
@@ -183,7 +228,9 @@ func (c *Coordinator) Handler() http.Handler {
 		}
 		if !hasBearer || !strings.EqualFold(scheme, "bearer") {
 			c.Log.Error("authentication_failed", "peer_ip", peer, "client_ip", client)
-			http.Error(w, "authentication required", 401)
+			// Anonymous requests receive the status only: no server facts and
+			// no body ever run in front of authentication.
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		identity, e := c.Tokens.Verify(secret)
@@ -229,6 +276,11 @@ func (c *Coordinator) Handler() http.Handler {
 			c.recordToolDenial()
 			c.Log.Error("authorization_denied", "token_id", identity.ID, "tool", auditToolName(message.Params.Name), "request_id", token.Random(12))
 			writeToolDenial(w, message)
+			return
+		}
+		if message, invalid := invalidToolCall(payload, identity.Roles, readOnly); invalid {
+			c.Log.Error("invalid_arguments", "token_id", identity.ID, "tool", auditToolName(message.Params.Name), "request_id", token.Random(12))
+			writeInvalidArguments(w, message)
 			return
 		}
 		ctx = context.WithValue(responseContext, secretKey{}, secret)

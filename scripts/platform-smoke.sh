@@ -88,8 +88,19 @@ fi
 printf '%s\n' 'HOSTLENS_STAGE: inspect system inventory and packages'
 "/helpers/smoke" /tmp/hostlens/token.json get_os_info "${arch}"
 "/helpers/smoke" /tmp/hostlens/token.json get_inventory "${arch}"
+# Discovery of the installed candidate must match the contract snapshot
+# shipped inside the very archive under test, byte for byte.
+"/helpers/smoke" --list /tmp/hostlens/token.json /tmp/release/tools.json
+"/helpers/smoke" --reject /tmp/hostlens/token.json get_os_info
+printf '%s\n' 'HOSTLENS_STAGE: one typed call per role'
+run_binary "/tmp/release/hostlens" token create \
+  --config /tmp/hostlens/config.yaml --name health --roles health --expires "${expiry}" >/tmp/hostlens/health.json
+"/helpers/smoke" /tmp/hostlens/health.json get_os_info "${arch}"
 if [ -z "${application}" ]; then
   "/helpers/smoke" /tmp/hostlens/token.json list_packages nonempty
+  run_binary "/tmp/release/hostlens" token create \
+    --config /tmp/hostlens/config.yaml --name inspect --roles inspect --expires "${expiry}" >/tmp/hostlens/inspect.json
+  "/helpers/smoke" /tmp/hostlens/inspect.json list_packages nonempty
 fi
 printf '%s\n' 'HOSTLENS_STAGE: verify backend status'
 run_binary "/tmp/release/hostlens" status \

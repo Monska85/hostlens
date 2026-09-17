@@ -54,70 +54,86 @@ func (c *Collector) auditDirectory(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "/"+rel), nil
 }
 
-func parseProcessStat(b []byte, pid int) (map[string]any, error) {
+func parseProcessStat(b []byte, pid int) (contract.ProcessDetail, error) {
 	s := strings.TrimSpace(string(b))
 	begin := strings.IndexByte(s, '(')
 	end := strings.LastIndexByte(s, ')')
 	if begin < 1 || end <= begin {
-		return nil, errors.New("malformed process stat")
+		return contract.ProcessDetail{}, errors.New("malformed process stat")
 	}
 	n, e := strconv.Atoi(strings.TrimSpace(s[:begin]))
 	if e != nil || n != pid {
-		return nil, errors.New("process identity changed")
+		return contract.ProcessDetail{}, errors.New("process identity changed")
 	}
 	fields := strings.Fields(s[end+1:])
 	if len(fields) < 22 || len(fields[0]) != 1 {
-		return nil, errors.New("short process stat")
+		return contract.ProcessDetail{}, errors.New("short process stat")
 	}
-	out := map[string]any{"pid": pid, "name": s[begin+1 : end], "state": fields[0]}
+	out := contract.ProcessDetail{PID: pid, Name: s[begin+1 : end], State: fields[0]}
 	for _, field := range []struct {
 		name  string
 		index int
 	}{{"parent_pid", 1}, {"user_cpu_ticks", 11}, {"system_cpu_ticks", 12}, {"threads", 17}, {"start_ticks", 19}, {"virtual_bytes", 20}, {"resident_pages", 21}} {
 		value, e := strconv.ParseUint(fields[field.index], 10, 64)
 		if e != nil {
-			return nil, fmt.Errorf("invalid process %s", field.name)
+			return contract.ProcessDetail{}, fmt.Errorf("invalid process %s", field.name)
 		}
-		out[field.name] = value
+		switch field.name {
+		case "parent_pid":
+			out.ParentPID = value
+		case "user_cpu_ticks":
+			out.UserCPUTicks = value
+		case "system_cpu_ticks":
+			out.SystemCPUTicks = value
+		case "threads":
+			out.Threads = value
+		case "start_ticks":
+			out.StartTicks = value
+		case "virtual_bytes":
+			out.VirtualBytes = value
+		case "resident_pages":
+			out.ResidentPages = value
+		}
 	}
 	return out, nil
 }
 
-func (c *Collector) processStat(pid int) (map[string]any, error) {
+func (c *Collector) processStat(pid int) (contract.ProcessDetail, error) {
 	b, err := c.file("/proc/"+strconv.Itoa(pid)+"/stat", true)
 	if err != nil {
-		return nil, err
+		return contract.ProcessDetail{}, err
 	}
 	result, err := parseProcessStat(b, pid)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errProcessStatMalformed, err)
+		return contract.ProcessDetail{}, fmt.Errorf("%w: %v", errProcessStatMalformed, err)
 	}
 	return result, nil
 }
 
-func (c *Collector) auditProcesses(ctx context.Context, r *contract.Result, a contract.Args) {
+func (c *Collector) auditProcesses(ctx context.Context, r *contract.Result, a contract.PageArgs) bool {
+	p := r.Data.(*contract.ProcessPage)
 	r.Source = "procfs"
-	r.Data["scope"] = "visible PID namespace; processes hidden by procfs permissions may be absent"
-	r.Data["snapshot_consistent"] = false
+	p.Scope = "visible PID namespace; processes hidden by procfs permissions may be absent"
+	p.SnapshotConsistent = false
 	limit := a.Limit
 	if limit == 0 {
 		limit = c.Config.Limits.PageSize
 	}
 	if limit < 1 || limit > c.Config.Limits.PageSize || a.Offset < 0 {
 		auditIssue(r, "invalid_bounds", "/proc", "page bounds exceed ceiling")
-		return
+		return false
 	}
 	dir, err := c.auditDirectory("/proc")
 	if err != nil {
 		code := auditErrorCode(err)
 		auditIssue(r, code, "/proc", "cannot enumerate processes under current policy or OS permissions")
-		return
+		return false
 	}
 	defer dir.Close()
 	entries, err := dir.ReadDir(auditMaxEntries + 1)
 	if err != nil && err != io.EOF {
 		auditIssue(r, "collection_failed", "/proc", err.Error())
-		return
+		return false
 	}
 	if len(entries) > auditMaxEntries {
 		entries = entries[:auditMaxEntries]
@@ -134,7 +150,7 @@ func (c *Collector) auditProcesses(ctx context.Context, r *contract.Result, a co
 	sort.Ints(pids)
 	start := min(a.Offset, len(pids))
 	end := min(start+limit, len(pids))
-	items := []map[string]any{}
+	rows := []contract.ProcessRow{}
 	failures := map[string]int{}
 	for _, pid := range pids[start:end] {
 		if ctx.Err() != nil {
@@ -150,7 +166,7 @@ func (c *Collector) auditProcesses(ctx context.Context, r *contract.Result, a co
 			failures[processErrorCode(e)]++
 			continue
 		}
-		items = append(items, item)
+		rows = append(rows, contract.ProcessRow{PID: item.PID, Name: item.Name, State: item.State, ParentPID: item.ParentPID, UserCPUTicks: item.UserCPUTicks, SystemCPUTicks: item.SystemCPUTicks, Threads: item.Threads, StartTicks: item.StartTicks, VirtualBytes: item.VirtualBytes, ResidentPages: item.ResidentPages})
 	}
 	for _, code := range []string{"policy_denied", "permission_denied", "source_unavailable", "malformed_source", "inspection_limit", "collection_failed"} {
 		if count := failures[code]; count > 0 {
@@ -160,31 +176,32 @@ func (c *Collector) auditProcesses(ctx context.Context, r *contract.Result, a co
 			}
 		}
 	}
-	r.Data["enumerated_processes"] = len(pids)
-	r.Data["observed_processes"] = len(items)
-	r.Data["items"] = items
+	p.EnumeratedProcesses = len(pids)
+	p.ObservedProcesses = len(rows)
+	p.Items = rows
 	if end < len(pids) {
 		r.NextOffset = &end
 	}
-
+	return true
 }
 
-func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a contract.Args) {
+func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a contract.PIDArgs) bool {
+	p := r.Data.(*contract.ProcessInfo)
 	r.Source = "procfs"
-	r.Data["scope"] = "visible PID namespace"
-	r.Data["snapshot_consistent"] = false
+	p.Scope = "visible PID namespace"
+	p.SnapshotConsistent = false
 	base := "/proc/" + strconv.Itoa(a.PID)
 	stat, ok := c.auditRead(r, base+"/stat")
 	if !ok {
-		return
+		return false
 	}
 	first, err := parseProcessStat(stat, a.PID)
 	if err != nil {
 		auditIssue(r, "malformed_source", base+"/stat", "invalid process identity or resource fields")
-		return
+		return false
 	}
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	if b, ok := c.auditRead(r, base+"/status"); ok {
 		for _, line := range strings.Split(string(b), "\n") {
@@ -210,30 +227,37 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 				}
 				if ids == nil {
 					auditIssue(r, "malformed_source", base+"/status", "invalid process identity values")
+				} else if key == "Uid" {
+					first.UID = ids
 				} else {
-					first[strings.ToLower(key)] = ids
+					first.GID = ids
 				}
 			case "NoNewPrivs", "Seccomp", "CapEff":
 				if len(fields) == 1 {
-					first[key] = fields[0]
+					switch key {
+					case "NoNewPrivs":
+						first.NoNewPrivs = fields[0]
+					case "Seccomp":
+						first.Seccomp = fields[0]
+					case "CapEff":
+						first.CapEff = fields[0]
+					}
 				}
 			}
 		}
 	}
 
-	for _, key := range []string{"uid", "gid"} {
-		if _, ok := first[key]; !ok {
-			auditIssue(r, "partial_observation", base+"/status", "process identity fields unavailable")
-		}
+	if first.UID == nil || first.GID == nil {
+		auditIssue(r, "partial_observation", base+"/status", "process identity fields unavailable")
 	}
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	dir, e := c.auditDirectory(base)
 	if e == nil {
 		target, e := c.auditLink(dir, "exe", base+"/exe", true)
 		if e == nil {
-			first["executable"] = target
+			first.Executable = target
 		} else {
 			processObservationIssue(r, base+"/exe", e)
 		}
@@ -242,7 +266,7 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 		processObservationIssue(r, base, e)
 	}
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	fds, e := c.auditDirectory(base + "/fd")
 	if e != nil {
@@ -280,7 +304,7 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 				}
 			}
 			sort.Slice(inodes, func(i, j int) bool { return inodes[i] < inodes[j] })
-			first["socket_inodes"] = inodes
+			first.SocketInodes = inodes
 			for _, code := range []string{"policy_denied", "permission_denied", "source_unavailable", "inspection_limit", "collection_failed"} {
 				if count := failures[code]; count > 0 {
 					auditIssue(r, code, base+"/fd", fmt.Sprintf("%d descriptor observations unavailable", count))
@@ -296,16 +320,17 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 	if err != nil {
 		processObservationIssue(r, base+"/stat", err)
 		auditIssue(r, "identity_unverified", base, "final process identity check unavailable; fields may span a PID reuse")
-		first["identity_rechecked"] = false
-		r.Data["process"] = first
-		return
+		first.IdentityRechecked = false
+		p.Process = &first
+		return true
 	}
-	if first["start_ticks"] != last["start_ticks"] {
+	if first.StartTicks != last.StartTicks {
 		auditIssue(r, "process_changed", base, "process exited or PID identity changed during observation")
-		return
+		return false
 	}
-	first["identity_rechecked"] = true
-	r.Data["process"] = first
+	first.IdentityRechecked = true
+	p.Process = &first
+	return true
 }
 
 // Read the link itself, never its target. Executable target paths are

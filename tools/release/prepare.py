@@ -99,6 +99,7 @@ def prepare(value):
             ("docs/v1/OPERATIONS.md", "OPERATIONS.md"),
             ("docs/v1/INSTALL.md", "INSTALL.md"),
             ("docs/v1/VALIDATION.md", "VALIDATION.md"),
+            ("docs/v1/tools.json", "tools.json"),
             ("LICENSE", "LICENSE"),
             ("NOTICE", "NOTICE.txt"),
         ):
@@ -137,6 +138,11 @@ def prepare(value):
                     if path.name in ("hostlens", "hostlens-diagnostics", "hostlens-docker-observer")
                     else 0o644
                 )
+    published = [OUT / ("linux-" + arch) / "tools.json" for arch in ARCHITECTURES]
+    if len({hashlib.sha256(path.read_bytes()).hexdigest() for path in published}) != 1:
+        raise ValueError(
+            "tools.json copies diverge between architectures; the registry is architecture-independent"
+        )
 
 
 if __name__ == "__main__":
