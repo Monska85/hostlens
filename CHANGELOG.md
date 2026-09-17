@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-18
+
+[Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.3.0...v0.4.0)
+
 ### Added
 
 - Every MCP tool now publishes a result schema (`outputSchema`) next to its argument schema in `tools/list`, and the whole contract ships as the machine-readable snapshot `docs/v1/tools.json` in every release archive and as a standalone checksummed release asset; clients can validate requests and results against the published member names.
@@ -19,10 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_hostlens_info` is available to `health`-role tokens whose holder has the `hostlens` audit grant (previously the `diagnostics` role).
 - The diagnostics backend IPC now carries typed tool arguments; MCP clients are unaffected because the gateway owns the client-facing envelope.
 - Audit and Docker tool failure paths return schema-valid empty payloads instead of bare empty `data` objects; issue codes and `isError` behavior are unchanged.
-
-### Removed
-
-- Nothing client-visible was removed.
 
 ## 0.3.0 - 2026-09-15
 
