@@ -47,6 +47,13 @@
 - **Write for the artifact's reader.** Human guides explain safe use; OpenSpec artifacts give agents exact requirements, testable scenarios, decisions, and truthful task status. Preserve enough detail for autonomous execution without copying the same contract across documents.
 - **Maintain the changelog.** Keep `CHANGELOG.md` following Keep a Changelog 2.0.0: `Unreleased` section on top, one `## x.y.z - YYYY-MM-DD` heading per version (plain text, no square brackets or reference-style links), entries grouped under the six change types. From the second release onward, place a `Compare with previous release` link on the line immediately after each release heading, pointing at the GitHub compare between the previous and new tags; the first release carries no such link.
 - **Write changelog entries for the reader's time.** Each entry is concise but effective: one bullet that states what changed and the observable consequence (behavior, safety, or performance). Skip implementation narrative, commit stories, and internal jargon a reader cannot act on; keep the numbers and facts a reader would look for.
+- **Sweep version references at every release.** Documentation examples hardcode release versions and go stale when a new version ships. Before tagging, list the candidate literals and compare each hit against the latest tag (`git describe --tags --abbrev=0`):
+
+  ```sh
+  git grep -nE 'v[0-9]+\.[0-9]+\.[0-9]+|hostlens-[0-9]+\.[0-9]+\.[0-9]+(-dev)?' -- '*.md' ':!CHANGELOG.md' ':!openspec/**'
+  ```
+
+  Update stale release-flow examples to the new version; keep justified hits as they are: historical notes, archived change records, and third-party versions. The `0.1.0-dev` development literal is replaced at packaging time and is never stale.
 
 ## Maintain these instructions
 

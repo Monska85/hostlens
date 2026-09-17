@@ -19,13 +19,13 @@ Root on a Linux target host with systemd and kernel 5.6 or newer (the first tool
 ```sh
 # 1. Download the newest release archive and checksums (repository readers
 #    can use gh; a browser works too):
-gh release download v0.2.0 -R Monska85/hostlens \
-  -p 'hostlens-0.2.0-linux-*.tar.gz' -p checksums.txt
+gh release download v0.4.0 -R Monska85/hostlens \
+  -p 'hostlens-0.4.0-linux-*.tar.gz' -p checksums.txt
 
 # 2. Verify, extract, install, and start:
 sha256sum --ignore-missing -c checksums.txt
 mkdir -p /opt/hostlens-release
-tar -xzf hostlens-0.2.0-linux-amd64.tar.gz -C /opt/hostlens-release
+tar -xzf hostlens-0.4.0-linux-amd64.tar.gz -C /opt/hostlens-release
 /opt/hostlens-release/hostlens install --source /opt/hostlens-release --privilege standard --apply --start
 
 # 3. Issue a token; the secret prints once:

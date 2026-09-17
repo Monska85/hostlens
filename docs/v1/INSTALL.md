@@ -33,7 +33,7 @@ Run this on a trusted workstation or the target host with the archive and `check
 ```sh
 sha256sum --ignore-missing -c checksums.txt
 mkdir -p /opt/hostlens-release
-tar -xzf hostlens-0.1.0-linux-amd64.tar.gz -C /opt/hostlens-release
+tar -xzf hostlens-0.4.0-linux-amd64.tar.gz -C /opt/hostlens-release
 ls /opt/hostlens-release
 ```
 
@@ -185,7 +185,7 @@ A result with `"available": true` and the negotiated Engine API confirms the int
 ## Upgrade
 
 ```sh
-hostlens upgrade --archive hostlens-0.1.0-linux-amd64.tar.gz --apply
+hostlens upgrade --archive hostlens-0.4.0-linux-amd64.tar.gz --apply
 ```
 
 The upgrade verifies every archive member, retains the previous executables, preserves configuration, tokens, and active profiles, and restarts only previously active services. Changed bundled profiles are saved as `.candidate` files for review. Upgrading from a release that predates the Docker observer does not install the new binary (the running release performs the upgrade). After enabling the section, restore the binary from the extracted release once:
