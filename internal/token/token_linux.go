@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Monska85/hostlens/internal/jsondoc"
 	"golang.org/x/sys/unix"
 )
 
@@ -58,14 +58,8 @@ func (s Store) read() ([]Record, error) {
 		return nil, errors.New("untrusted token store owner")
 	}
 	var records []Record
-	d := json.NewDecoder(io.LimitReader(f, maxStoreBytes))
-	d.DisallowUnknownFields()
-	if e = d.Decode(&records); e != nil {
+	if e = jsondoc.DecodeStrict(f, maxStoreBytes, &records); e != nil {
 		return nil, e
-	}
-	var trailing any
-	if e = d.Decode(&trailing); e != io.EOF {
-		return nil, errors.New("exactly one token JSON document required")
 	}
 	return records, nil
 }
@@ -122,6 +116,16 @@ func (s Store) change(fn func(*[]Record) error) error {
 	return Atomic(s.Path, data, 0640)
 }
 func Atomic(path string, data []byte, mode os.FileMode) error {
+	return atomic(path, data, mode, false)
+}
+
+// AtomicNew publishes a new file without replacing a path created after a
+// lifecycle preflight. The temporary file and destination share a directory.
+func AtomicNew(path string, data []byte, mode os.FileMode) error {
+	return atomic(path, data, mode, true)
+}
+
+func atomic(path string, data []byte, mode os.FileMode, create bool) error {
 	dir := filepath.Dir(path)
 	f, e := os.CreateTemp(dir, ".hostlens-")
 	if e != nil {
@@ -140,7 +144,11 @@ func Atomic(path string, data []byte, mode os.FileMode) error {
 		e = ce
 	}
 	if e == nil {
-		e = os.Rename(name, path)
+		if create {
+			e = unix.Renameat2(unix.AT_FDCWD, name, unix.AT_FDCWD, path, unix.RENAME_NOREPLACE)
+		} else {
+			e = os.Rename(name, path)
+		}
 	}
 	if e != nil {
 		return e

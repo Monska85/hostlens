@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -26,6 +27,9 @@ func TestCallPreservesContextFailure(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 				defer cancel()
 				c := Coordinator{Active: backend.Snapshot{Generation: "one"}, HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if stage == "/status" && r.URL.Path == "/call" {
+						return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"error":true,"issues":[{"code":"generation_mismatch"}]}`)), Header: make(http.Header)}, nil
+					}
 					if r.URL.Path == stage {
 						if cancelled {
 							cancel()
@@ -44,6 +48,58 @@ func TestCallPreservesContextFailure(t *testing.T) {
 					t.Fatalf("lost cause: %+v %v", result, err)
 				}
 			})
+		}
+	}
+}
+
+func TestCallSynchronizesOnlyAfterGenerationMismatch(t *testing.T) {
+	t.Parallel()
+	for _, mismatch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "current", true: "stale"}[mismatch], func(t *testing.T) {
+			var paths []string
+			calls := 0
+			c := Coordinator{Active: backend.Snapshot{Generation: "one"}, HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				paths = append(paths, r.URL.Path)
+				body := `{}`
+				switch r.URL.Path {
+				case "/call":
+					calls++
+					if mismatch && calls == 1 {
+						body = `{"error":true,"issues":[{"code":"generation_mismatch"}]}`
+					}
+				case "/status":
+					body = `{"generation":"old"}`
+				case "/prepare":
+					body = `{"prepared":true}`
+				case "/activate":
+					body = `{"active":true}`
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})}}
+			result, err := c.Call(context.Background(), "get_os_info", json.RawMessage(`{}`), "test")
+			if err != nil || result.Error {
+				t.Fatal(result, err)
+			}
+			want := "/call"
+			if mismatch {
+				want = "/call,/status,/prepare,/activate,/call"
+			}
+			if got := strings.Join(paths, ","); got != want {
+				t.Fatalf("backend requests %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestBackendRPCRejectsTrailingAndOversizedResponses(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{`{} {}`, `{} garbage`, `{}` + strings.Repeat(" ", maxBackendResponseBytes)} {
+		c := Coordinator{HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})}}
+		var result backend.Status
+		if err := c.rpc(context.Background(), "/status", nil, &result); err == nil {
+			t.Fatal("accepted invalid backend response")
 		}
 	}
 }

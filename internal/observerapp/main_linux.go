@@ -49,11 +49,12 @@ func Main(args []string) error {
 	if *path == "" {
 		*path = "/etc/hostlens/config.yaml"
 	}
-	b, e := os.ReadFile(*path)
+	remaining := 1 << 20
+	b, e := config.ReadTrustedLinux(*path, 0, &remaining)
 	if e != nil {
-		return e
+		return fmt.Errorf("observer configuration invalid: %w", e)
 	}
-	var cfg config.Config
+	cfg := config.DefaultsLinux(true)
 	if e := config.Decode(b, &cfg); e != nil {
 		return fmt.Errorf("observer configuration invalid: %w", e)
 	}

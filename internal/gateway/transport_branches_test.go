@@ -74,3 +74,17 @@ func TestMCPEnvelopesAcceptArrayObjectAndRejectGarbage(t *testing.T) {
 		t.Fatal("empty payload accepted")
 	}
 }
+
+func TestToolPreflightDenialWinsAcrossBatch(t *testing.T) {
+	t.Parallel()
+	payload := []byte(`[{"id":1,"method":"tools/call","params":{"name":"read_config","arguments":{"path":7}}},{"id":2,"method":"tools/call","params":{"name":"unknown_tool","arguments":{}}}]`)
+	message, outcome := preflightToolCall(payload, []string{"diagnostics"}, true)
+	if outcome != toolDenied || string(message.ID) != "2" {
+		t.Fatalf("denial did not win over invalid arguments: %v, %s", outcome, message.ID)
+	}
+	payload = []byte(`{"id":1,"method":"tools/call","params":{"name":"read_config","arguments":{"path":7}}}`)
+	message, outcome = preflightToolCall(payload, []string{"diagnostics"}, true)
+	if outcome != toolInvalid || string(message.ID) != "1" {
+		t.Fatalf("invalid arguments were not rejected: %v, %s", outcome, message.ID)
+	}
+}

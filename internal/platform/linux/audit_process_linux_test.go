@@ -177,7 +177,8 @@ func TestAuditLinkResolvedChildDenial(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer dir.Close()
-	if _, e := c.auditLink(dir, "7", "/alias/7", false); e == nil {
+	scratch := make([]byte, 4097)
+	if _, e := c.auditLink(dir, "7", "/alias/7", false, scratch); e == nil {
 		t.Fatal("resolved descriptor source escaped denial")
 	}
 }
@@ -192,19 +193,40 @@ func TestProcessLinkReadsConsumeAggregateBudget(t *testing.T) {
 	dir, err := c.auditDirectory("/proc/42/fd")
 	fixtureOK(t, err)
 	defer dir.Close()
+	scratch := make([]byte, 4097)
 	budget := len("socket:[123]")
 	c.auditRemaining = &budget
-	target, err := c.auditLink(dir, "3", "/proc/42/fd/3", false)
+	target, err := c.auditLink(dir, "3", "/proc/42/fd/3", false, scratch)
 	if err != nil || target != "socket:[123]" || budget != 0 {
 		t.Fatalf("uncharged link: %q %d %v", target, budget, err)
 	}
 	// Missing link must not be inspected after exhausting the budget.
-	if _, err = c.auditLink(dir, "missing", "/proc/42/fd/missing", false); !errors.Is(err, errAuditLimit) {
+	if _, err = c.auditLink(dir, "missing", "/proc/42/fd/missing", false, scratch); !errors.Is(err, errAuditLimit) {
 		t.Fatal(err)
 	}
 	budget = 3
-	if target, err = c.auditLink(dir, "3", "/proc/42/fd/3", false); target != "" || !errors.Is(err, errAuditLimit) || budget != 0 {
+	if target, err = c.auditLink(dir, "3", "/proc/42/fd/3", false, scratch); target != "" || !errors.Is(err, errAuditLimit) || budget != 0 {
 		t.Fatalf("partial link exposed or uncharged: %q %d %v", target, budget, err)
+	}
+}
+
+func TestProcessLinkBufferDoesNotLeakPreviousTarget(t *testing.T) {
+	t.Parallel()
+	c, root := fixture(t)
+	c.Root = root
+	path := filepath.Join(root, "proc/42/fd")
+	fixtureOK(t, os.MkdirAll(path, 0700))
+	fixtureOK(t, os.Symlink("socket:[123456]", filepath.Join(path, "3")))
+	fixtureOK(t, os.Symlink("socket:[7]", filepath.Join(path, "4")))
+	dir, err := c.auditDirectory("/proc/42/fd")
+	fixtureOK(t, err)
+	defer dir.Close()
+	scratch := make([]byte, 4097)
+	for _, item := range []struct{ name, want string }{{"3", "socket:[123456]"}, {"4", "socket:[7]"}} {
+		got, err := c.auditLink(dir, item.name, "/proc/42/fd/"+item.name, false, scratch)
+		if err != nil || got != item.want {
+			t.Fatalf("link %s: got %q, want %q, error %v", item.name, got, item.want, err)
+		}
 	}
 }
 

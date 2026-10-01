@@ -34,6 +34,14 @@ if ! go list -deps ./cmd/... >/dev/null; then
   exit 1
 fi
 
+if [ "${1:-test}" = benchmark ]; then
+  printf '%s\n' 'HOSTLENS_STAGE: benchmark representative request paths'
+  go test -run '^$' -bench 'Benchmark(Status|Allowed|ServiceRequest|DockerInventory|ProcessLink)' \
+    -benchmem -benchtime=200ms -count=5 ./internal/backend ./internal/gateway ./internal/policy ./internal/platform/linux
+  printf '%s\n' 'PASS: container benchmarks completed'
+  exit 0
+fi
+
 printf '%s\n' 'HOSTLENS_STAGE: validate module integrity'
 go mod verify
 printf '%s\n' 'HOSTLENS_STAGE: run go race tests'

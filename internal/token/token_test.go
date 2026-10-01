@@ -3,6 +3,7 @@ package token
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/Monska85/hostlens/internal/contract"
 	"golang.org/x/sys/unix"
 	"os"
@@ -356,7 +357,7 @@ func TestRotateNeverExpiringToken(t *testing.T) {
 }
 
 func TestMetricsRoleIsIndependent(t *testing.T) {
-	if !RolesOK([]string{"metrics"}) || RolesOK([]string{"admin"}) {
+	if !RolesOK([]string{"metrics"}) || RolesOK([]string{"admin"}) || RolesOK([]string{string(contract.RoleRemediation)}) {
 		t.Fatal("role validation")
 	}
 	for _, tool := range contract.ToolNames() {
@@ -395,5 +396,19 @@ func TestMetricsRoleIsIndependent(t *testing.T) {
 	s.AdminUID++
 	if s.Update(row.ID, []string{"metrics"}, false) == nil {
 		t.Fatal("metrics bypassed local admin identity")
+	}
+}
+
+func TestAtomicNewPreservesExistingPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "observer")
+	if err := AtomicNew(path, []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicNew(path, []byte("second"), 0600); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("existing destination replaced or wrong error: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != "first" {
+		t.Fatalf("existing destination changed: %q, %v", content, err)
 	}
 }

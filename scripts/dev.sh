@@ -62,7 +62,7 @@ case "${1:-help}" in
     ;;
   lint)
     .tools/python/bin/ruff check tools
-    shellcheck --shell=sh scripts/*.sh
+    shellcheck -x --shell=sh scripts/*.sh
     .tools/bin/actionlint
     ;;
   help)
@@ -72,11 +72,14 @@ case "${1:-help}" in
       'lint                       Check Python, shell and GitHub workflows' \
       'test                       Container race tests, Go vet and cross-builds' \
       'coverage                   Container checks with Go text and HTML reports' \
+      'benchmark                  Measure representative paths in a disposable container' \
       'check                      Run fmt-check, lint and test' \
       'build                      Compile Linux binaries using Go only' \
       'package / verify-archives  Build or verify installable Linux archives' \
       'release-check              Validate GoReleaser configurations' \
       'test-image                 Build the container validation toolchain' \
+      'prepare-live-docker        Pull pinned private Docker acceptance images' \
+      'test-live-docker           Run the observer against a disposable nested engine' \
       'scan-vulnerabilities       Scan Go dependencies in a disposable container' \
       'test-targets               List container matrix targets' \
       'test-matrix                Run all cases or one target (Make TARGET= / Just argument)' \

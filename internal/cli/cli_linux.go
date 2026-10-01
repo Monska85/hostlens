@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,21 @@ import (
 
 // maxAdminResponseBytes bounds any administrative IPC response the CLI reads.
 const maxAdminResponseBytes = 65536
+
+func readAdminResponse(body io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(body, maxAdminResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxAdminResponseBytes {
+		return nil, errors.New("administrative response exceeds size limit")
+	}
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(trimmed) {
+		return nil, errors.New("invalid administrative response")
+	}
+	return b, nil
+}
 
 func flags(name string) *flag.FlagSet { return flag.NewFlagSet(name, flag.ContinueOnError) }
 func Main(args []string) error {
@@ -179,7 +195,12 @@ func Main(args []string) error {
 		if resp.StatusCode != 200 {
 			return fmt.Errorf("administrative operation failed: %d", resp.StatusCode)
 		}
-		_, e = io.Copy(os.Stdout, io.LimitReader(resp.Body, maxAdminResponseBytes))
+		var body []byte
+		body, e = readAdminResponse(resp.Body)
+		if e != nil {
+			return e
+		}
+		_, e = os.Stdout.Write(body)
 		return e
 	case "policy":
 		if sub != "explain" || target == "" {
@@ -252,10 +273,13 @@ func explain(s backend.Snapshot, configPath, target string, recursive bool, uid 
 		resp, e := linux.UnixClient(s.Config.AdminSocket).Post("http://unix/status", "application/json", nil)
 		if e == nil {
 			defer resp.Body.Close()
-			if resp.StatusCode == 200 && json.NewDecoder(io.LimitReader(resp.Body, maxAdminResponseBytes)).Decode(&live) == nil {
-				comparison = "DIFFERENT"
-				if live.Fingerprint == s.Fingerprint {
-					comparison = "MATCH"
+			if resp.StatusCode == 200 {
+				body, readErr := readAdminResponse(resp.Body)
+				if readErr == nil && json.Unmarshal(body, &live) == nil {
+					comparison = "DIFFERENT"
+					if live.Fingerprint == s.Fingerprint {
+						comparison = "MATCH"
+					}
 				}
 			}
 		}

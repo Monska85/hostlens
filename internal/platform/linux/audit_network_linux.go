@@ -140,45 +140,28 @@ func parseIPv6Routes(b []byte) ([]contract.IPv6Route, error) {
 		if len(f) != 10 {
 			return nil, errors.New("invalid IPv6 route")
 		}
-		row := contract.IPv6Route{Interface: f[9]}
-		for _, v := range []struct {
-			k string
-			i int
-		}{{"destination", 0}, {"source", 2}, {"gateway", 4}} {
-			s, e := procAddress(f[v.i], false)
-			if len(f[v.i]) != 32 {
+		var addresses [3]string
+		for i, field := range []int{0, 2, 4} {
+			s, e := procAddress(f[field], false)
+			if len(f[field]) != 32 {
 				return nil, errors.New("invalid IPv6 address width")
 			}
 			if e != nil {
 				return nil, e
 			}
-			switch v.k {
-			case "destination":
-				row.Destination = s
-			case "source":
-				row.Source = s
-			case "gateway":
-				row.Gateway = s
-			}
+			addresses[i] = s
 		}
-		for _, v := range []struct {
-			k string
-			i int
-		}{{"destination_prefix", 1}, {"source_prefix", 3}, {"metric", 5}, {"flags", 8}} {
-			n, e := strconv.ParseUint(f[v.i], 16, 32)
-			if e != nil || ((v.i == 1 || v.i == 3) && n > 128) {
+		var values [4]uint32
+		for i, field := range []int{1, 3, 5, 8} {
+			n, e := strconv.ParseUint(f[field], 16, 32)
+			if e != nil || (i < 2 && n > 128) {
 				return nil, errors.New("invalid IPv6 route value")
 			}
-			switch v.k {
-			case "destination_prefix":
-				row.DestinationPrefix = uint32(n)
-			case "source_prefix":
-				row.SourcePrefix = uint32(n)
-			case "metric":
-				row.Metric = uint32(n)
-			case "flags":
-				row.Flags = uint32(n)
-			}
+			values[i] = uint32(n)
+		}
+		row := contract.IPv6Route{
+			Interface: f[9], Destination: addresses[0], Source: addresses[1], Gateway: addresses[2],
+			DestinationPrefix: values[0], SourcePrefix: values[1], Metric: values[2], Flags: values[3],
 		}
 		out = append(out, row)
 		if len(out) > auditMaxEntries {
@@ -202,33 +185,17 @@ func parseInterfaces(b []byte) ([]contract.InterfaceRow, error) {
 		if len(f) != 16 {
 			return nil, errors.New("invalid interface counters")
 		}
-		row := contract.InterfaceRow{Name: strings.TrimSpace(name)}
-		for _, v := range []struct {
-			k string
-			i int
-		}{{"rx_bytes", 0}, {"rx_packets", 1}, {"rx_errors", 2}, {"rx_dropped", 3}, {"tx_bytes", 8}, {"tx_packets", 9}, {"tx_errors", 10}, {"tx_dropped", 11}} {
-			n, e := strconv.ParseUint(f[v.i], 10, 64)
+		var counters [8]uint64
+		for i, field := range []int{0, 1, 2, 3, 8, 9, 10, 11} {
+			n, e := strconv.ParseUint(f[field], 10, 64)
 			if e != nil {
 				return nil, e
 			}
-			switch v.k {
-			case "rx_bytes":
-				row.RxBytes = n
-			case "rx_packets":
-				row.RxPackets = n
-			case "rx_errors":
-				row.RxErrors = n
-			case "rx_dropped":
-				row.RxDropped = n
-			case "tx_bytes":
-				row.TxBytes = n
-			case "tx_packets":
-				row.TxPackets = n
-			case "tx_errors":
-				row.TxErrors = n
-			case "tx_dropped":
-				row.TxDropped = n
-			}
+			counters[i] = n
+		}
+		row := contract.InterfaceRow{
+			Name: strings.TrimSpace(name), RxBytes: counters[0], RxPackets: counters[1], RxErrors: counters[2], RxDropped: counters[3],
+			TxBytes: counters[4], TxPackets: counters[5], TxErrors: counters[6], TxDropped: counters[7],
 		}
 		out = append(out, row)
 		if len(out) > auditMaxEntries {
@@ -254,26 +221,15 @@ func parseIPv6Addresses(b []byte) ([]contract.IPv6Address, error) {
 		if e != nil {
 			return nil, e
 		}
-		row := contract.IPv6Address{Address: ip, Interface: f[5]}
-		for _, v := range []struct {
-			k string
-			i int
-		}{{"index", 1}, {"prefix", 2}, {"scope", 3}, {"flags", 4}} {
-			n, e := strconv.ParseUint(f[v.i], 16, 32)
-			if e != nil || (v.i == 2 && n > 128) {
+		var values [4]uint32
+		for i, field := range []int{1, 2, 3, 4} {
+			n, e := strconv.ParseUint(f[field], 16, 32)
+			if e != nil || (i == 1 && n > 128) {
 				return nil, errors.New("invalid IPv6 address attribute")
 			}
-			switch v.k {
-			case "index":
-				row.Index = uint32(n)
-			case "prefix":
-				row.Prefix = uint32(n)
-			case "scope":
-				row.Scope = uint32(n)
-			case "flags":
-				row.Flags = uint32(n)
-			}
+			values[i] = uint32(n)
 		}
+		row := contract.IPv6Address{Address: ip, Interface: f[5], Index: values[0], Prefix: values[1], Scope: values[2], Flags: values[3]}
 		out = append(out, row)
 		if len(out) > auditMaxEntries {
 			return nil, errors.New("address limit exceeded")

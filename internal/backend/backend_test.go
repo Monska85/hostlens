@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -29,6 +30,18 @@ func TestSnapshotFingerprintIncludesMCPReadOnly(t *testing.T) {
 	}
 	if first.Fingerprint != NewSnapshot(first.Config, p).Fingerprint {
 		t.Fatal("equivalent settings changed fingerprint")
+	}
+}
+
+func TestIPCDecodeRejectsTrailingAndOversizedBodies(t *testing.T) {
+	t.Parallel()
+	valid := `{"version":1}`
+	for _, body := range []string{valid + ` {}`, valid + ` garbage`, valid + strings.Repeat(" ", 64)} {
+		r := httptest.NewRequest(http.MethodPost, "/call", strings.NewReader(body))
+		var request contract.Request
+		if err := decode(r, &request, int64(len(valid)+32)); err == nil {
+			t.Fatal("accepted malformed or oversized IPC request")
+		}
 	}
 }
 
@@ -150,6 +163,7 @@ func TestInvalidArgumentsRejectedWithoutCollectorOrAdmission(t *testing.T) {
 		"malformed type":  `{"path":5}`,
 		"malformed deep":  `{"unit":"nginx","priority":"high"}`,
 		"wrong json type": `["path"]`,
+		"second document": `{"path":"/etc/hostname"}{"path":"/etc/passwd"}`,
 	} {
 		tool := "read_config"
 		if name == "malformed deep" {

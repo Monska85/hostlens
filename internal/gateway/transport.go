@@ -48,21 +48,40 @@ func mcpEnvelopes(payload []byte) ([]mcpEnvelope, error) {
 	return []mcpEnvelope{message}, nil
 }
 
-func deniedToolCall(payload []byte, roles []string, readOnly bool) (mcpEnvelope, bool) {
+type toolPreflight int
+
+const (
+	toolAccepted toolPreflight = iota
+	toolDenied
+	toolInvalid
+)
+
+// Denial wins over malformed arguments across an entire batch. Parse the
+// envelope once while preserving that ordering before the SDK sees the body.
+func preflightToolCall(payload []byte, roles []string, readOnly bool) (mcpEnvelope, toolPreflight) {
 	messages, err := mcpEnvelopes(payload)
 	if err != nil {
-		return mcpEnvelope{}, false
+		return mcpEnvelope{}, toolAccepted
 	}
+	var invalid mcpEnvelope
+	hasInvalid := false
 	for _, message := range messages {
 		if message.Method != "tools/call" {
 			continue
 		}
 		definition, known := contract.Tool(message.Params.Name)
 		if !toolAdmitted(definition, known, readOnly) || !token.Allows(roles, message.Params.Name) {
-			return message, true
+			return message, toolDenied
+		}
+		if !hasInvalid && validateInput(definition.Name, message.Params.Arguments) != nil {
+			invalid = message
+			hasInvalid = true
 		}
 	}
-	return mcpEnvelope{}, false
+	if hasInvalid {
+		return invalid, toolInvalid
+	}
+	return mcpEnvelope{}, toolAccepted
 }
 
 func writeToolDenial(w http.ResponseWriter, message mcpEnvelope) {
@@ -79,29 +98,6 @@ func writeToolDenial(w http.ResponseWriter, message mcpEnvelope) {
 			"message": "authorization denied",
 		},
 	})
-}
-
-// invalidToolCall returns the first admitted tools/call whose arguments fail
-// the tool's resolved input schema. Denials are handled by deniedToolCall; this
-// pass runs after it so authorization still wins over argument validation.
-func invalidToolCall(payload []byte, roles []string, readOnly bool) (mcpEnvelope, bool) {
-	messages, err := mcpEnvelopes(payload)
-	if err != nil {
-		return mcpEnvelope{}, false
-	}
-	for _, message := range messages {
-		if message.Method != "tools/call" {
-			continue
-		}
-		definition, known := contract.Tool(message.Params.Name)
-		if !toolAdmitted(definition, known, readOnly) || !token.Allows(roles, message.Params.Name) {
-			continue
-		}
-		if err := validateInput(definition.Name, message.Params.Arguments); err != nil {
-			return message, true
-		}
-	}
-	return mcpEnvelope{}, false
 }
 
 // writeInvalidArguments answers with a tool-level error result carrying the
@@ -144,22 +140,28 @@ func ClientIP(peer, header string, trusted []string) string {
 	if !isTrusted(a) || header == "" {
 		return peer
 	}
-	chain := strings.Split(header, ",")
-	if len(chain) > 64 {
+	if strings.Count(header, ",") >= 64 {
 		return peer
 	}
-	parsed := make([]netip.Addr, len(chain))
-	for i, s := range chain {
-		p, e := netip.ParseAddr(strings.TrimSpace(s))
+	// Keep the rightmost untrusted address while validating the entire chain.
+	// A malformed left hop must still invalidate the header.
+	var client string
+	for {
+		part, rest, more := strings.Cut(header, ",")
+		p, e := netip.ParseAddr(strings.TrimSpace(part))
 		if e != nil {
 			return peer
 		}
-		parsed[i] = p
-	}
-	for i := len(parsed) - 1; i >= 0; i-- {
-		if !isTrusted(parsed[i]) {
-			return parsed[i].String()
+		if !isTrusted(p) {
+			client = p.String()
 		}
+		if !more {
+			break
+		}
+		header = rest
+	}
+	if client != "" {
+		return client
 	}
 	return peer
 }
@@ -272,13 +274,14 @@ func (c *Coordinator) Handler() http.Handler {
 		c.mu.RLock()
 		readOnly := c.Active.Config.MCP.ReadOnly
 		c.mu.RUnlock()
-		if message, denied := deniedToolCall(payload, identity.Roles, readOnly); denied {
+		message, preflight := preflightToolCall(payload, identity.Roles, readOnly)
+		if preflight == toolDenied {
 			c.recordToolDenial()
 			c.Log.Error("authorization_denied", "token_id", identity.ID, "tool", auditToolName(message.Params.Name), "request_id", token.Random(12))
 			writeToolDenial(w, message)
 			return
 		}
-		if message, invalid := invalidToolCall(payload, identity.Roles, readOnly); invalid {
+		if preflight == toolInvalid {
 			c.Log.Error("invalid_arguments", "token_id", identity.ID, "tool", auditToolName(message.Params.Name), "request_id", token.Random(12))
 			writeInvalidArguments(w, message)
 			return

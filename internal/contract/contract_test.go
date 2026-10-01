@@ -25,6 +25,8 @@ func TestToolRegistryIsClosedAndComplete(t *testing.T) {
 		{"missing typed contract", []ToolDefinition{{Name: "broken", Effect: EffectDiagnostic, RequiredRole: RoleDiagnostics, Capability: "broken", Description: "no schemas"}}},
 		{"unknown effect", []ToolDefinition{{Name: "broken", Effect: Effect("write"), RequiredRole: RoleDiagnostics, Capability: "broken", Description: "unknown effect", In: typed.In, Out: typed.Out, InputSchema: typed.InputSchema, OutputSchema: typed.OutputSchema}}},
 		{"unknown role", []ToolDefinition{{Name: "broken", Effect: EffectDiagnostic, RequiredRole: Role("typo"), Capability: "broken", Description: "unknown role", In: typed.In, Out: typed.Out, InputSchema: typed.InputSchema, OutputSchema: typed.OutputSchema}}},
+		{"remediation with diagnostic role", []ToolDefinition{func() ToolDefinition { d := typed; d.Effect = EffectRemediation; return d }()}},
+		{"diagnostic with remediation role", []ToolDefinition{func() ToolDefinition { d := typed; d.RequiredRole = RoleRemediation; return d }()}},
 		{"duplicate", []ToolDefinition{typed, typed}},
 		{"duplicate description", []ToolDefinition{typed, func() ToolDefinition { d := typed; d.Name = "other"; d.Capability = "other"; return d }()}},
 	} {
@@ -33,6 +35,12 @@ func TestToolRegistryIsClosedAndComplete(t *testing.T) {
 				t.Fatal("invalid registry accepted")
 			}
 		})
+	}
+	reserved := typed
+	reserved.Effect = EffectRemediation
+	reserved.RequiredRole = RoleRemediation
+	if err := ValidateRegistry([]ToolDefinition{reserved}); err != nil {
+		t.Fatalf("future remediation registry boundary: %v", err)
 	}
 	definitions[0].Name = "mutated"
 	names := ToolNames()

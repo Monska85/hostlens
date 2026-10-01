@@ -211,16 +211,14 @@ func (p *Policy) DockerKindDenied(kind string) bool {
 }
 
 // DockerDecision evaluates one resource across its requested selector and the
-// resolved stable identity. Every allow and deny rule that matches either
-// form applies, and denial wins. A denied container also excludes that
-// container's stats and logs regardless of stats or log grants. An empty
-// selector means identity-only evaluation.
-func (p *Policy) DockerDecision(kind, selector, id string) bool {
-	if p.deniesDocker(kind, selector, id) {
+// resolved stable identity. Current names also participate in denial, which
+// wins over every grant. A denied container excludes its stats and logs.
+func (p *Policy) DockerDecision(kind, selector, id string, names ...string) bool {
+	if p.deniesDockerForms(kind, selector, id, names) {
 		return false
 	}
 	if kind == "stats" || kind == "logs" {
-		if p.deniesDocker("container", selector, id) {
+		if p.deniesDockerForms("container", selector, id, names) {
 			return false
 		}
 	}
@@ -236,10 +234,14 @@ func (p *Policy) DockerDecision(kind, selector, id string) bool {
 
 // DockerListDecision evaluates one inventory item for list membership. A
 // collection grant authorizes listing; item forms refine both allow and
-// deny, and denial wins across stable IDs and current names.
-func (p *Policy) DockerListDecision(kind, selector, id, collection string) bool {
-	if p.deniesDocker(kind, selector, id) {
+// deny, and denial wins across stable IDs and current names. The caller
+// evaluates the collection grant once per inventory.
+func (p *Policy) DockerListDecision(kind, selector, id string, collectionGranted bool, names ...string) bool {
+	if p.deniesDockerForms(kind, selector, id, names) {
 		return false
+	}
+	if collectionGranted {
+		return true
 	}
 	if p.Allowed("docker", kind+"/"+id, false) {
 		return true
@@ -247,21 +249,32 @@ func (p *Policy) DockerListDecision(kind, selector, id, collection string) bool 
 	if selector != "" && selector != id && p.Allowed("docker", kind+"/"+selector, false) {
 		return true
 	}
-	return p.Allowed("docker", collection, false)
+	return false
+}
+
+func (p *Policy) deniesDockerForms(kind, selector, id string, names []string) bool {
+	if p.deniesDocker(kind, selector, id) {
+		return true
+	}
+	for _, name := range names {
+		if name != "" && name != selector && name != id && p.DockerDenied(kind, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Policy) deniesDocker(kind, selector, id string) bool {
-	for _, form := range []string{kind + "/" + id, kind + "/" + selector} {
-		if form == "" || strings.HasSuffix(form, "/") {
+	var identityForm, selectorForm string
+	for _, r := range p.Rules {
+		if r.Inactive || !r.Deny || r.Category != "docker" {
 			continue
 		}
-		for _, r := range p.Rules {
-			if r.Inactive || !r.Deny || r.Category != "docker" {
-				continue
-			}
-			if p.semantics.matches(r, form) {
-				return true
-			}
+		if identityForm == "" {
+			identityForm, selectorForm = kind+"/"+id, kind+"/"+selector
+		}
+		if id != "" && p.semantics.matches(r, identityForm) || selector != "" && p.semantics.matches(r, selectorForm) {
+			return true
 		}
 	}
 	return false

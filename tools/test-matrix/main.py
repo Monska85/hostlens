@@ -34,6 +34,7 @@ def command_for(case):
             str(ROOT / "scripts/test-systemd-container.sh"),
             case["mode"],
             os.environ.get("HOSTLENS_SYSTEMD_IMAGE", case["image"]),
+            case["arch"],
         ]
     command = [str(ROOT / "scripts/test-platforms.sh"), case["image"], case["arch"]]
     if case.get("application"):

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/Monska85/hostlens/internal/config"
 	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/jsondoc"
 	"github.com/Monska85/hostlens/internal/policy"
 	"github.com/Monska85/hostlens/internal/telemetry"
 )
@@ -125,16 +125,7 @@ func (s *Server) Status(ctx context.Context) (Status, error) {
 	}
 }
 func decode(r *http.Request, v any, n int64) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, n+1))
-	d.DisallowUnknownFields()
-	if e := d.Decode(v); e != nil {
-		return e
-	}
-	var x any
-	if e := d.Decode(&x); e != io.EOF {
-		return errors.New("one JSON object required")
-	}
-	return nil
+	return jsondoc.DecodeStrict(r.Body, n, v)
 }
 
 // decodeArgs decodes the raw IPC argument object into the typed argument
@@ -146,9 +137,7 @@ func decodeArgs(raw json.RawMessage, v any) error {
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
-	d := json.NewDecoder(bytes.NewReader(trimmed))
-	d.DisallowUnknownFields()
-	return d.Decode(v)
+	return jsondoc.DecodeStrict(bytes.NewReader(trimmed), int64(len(trimmed)), v)
 }
 
 func respond(w http.ResponseWriter, v any) {

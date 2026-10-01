@@ -129,6 +129,6 @@ func (c *Collector) auditStorage(ctx context.Context, r *contract.Result) bool {
 	return evidence
 }
 
-func decodeMountField(s string) string {
-	return strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`).Replace(s)
-}
+var mountFieldReplacer = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+
+func decodeMountField(s string) string { return mountFieldReplacer.Replace(s) }

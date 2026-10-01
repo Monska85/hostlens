@@ -2,7 +2,6 @@
 package telemetry
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/jsondoc"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -232,19 +232,9 @@ func BackendUp(up bool) *dto.MetricFamily {
 // DecodeBackend accepts only the fixed backend catalog, with no metadata or
 // dimensions supplied by an inspected application. Re-encoding discards wire bytes.
 func DecodeBackend(reader io.Reader) ([]*dto.MetricFamily, error) {
-	data, err := io.ReadAll(io.LimitReader(reader, MaxBytes+1))
-	if err != nil || len(data) > MaxBytes {
-		return nil, errors.New("invalid telemetry size")
-	}
 	var families []*dto.MetricFamily
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err = d.Decode(&families); err != nil {
+	if err := jsondoc.DecodeStrict(reader, MaxBytes, &families); err != nil {
 		return nil, err
-	}
-	var extra any
-	if d.Decode(&extra) != io.EOF {
-		return nil, errors.New("trailing telemetry")
 	}
 	if len(families) == 0 || len(families) > 11 {
 		return nil, errors.New("invalid telemetry catalog")

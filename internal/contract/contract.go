@@ -26,6 +26,7 @@ const (
 	RoleHealth      Role = "health"
 	RoleInspect     Role = "inspect"
 	RoleDiagnostics Role = "diagnostics"
+	RoleRemediation Role = "remediation"
 )
 
 // Request is the IPC message for one tool call. Args stays raw JSON here; the
@@ -67,7 +68,7 @@ func (r *Result) Issue(code, source, msg string) {
 
 func (r Result) Bounded(n int) Result {
 	b, e := json.Marshal(r)
-	mirror, mirrorErr := json.Marshal(map[string]any{"isError": r.Error, "content": []map[string]string{{"type": "text", "text": string(b)}}, "structuredContent": r})
+	mirror, mirrorErr := json.Marshal(map[string]any{"isError": r.Error, "content": []map[string]string{{"type": "text", "text": string(b)}}, "structuredContent": json.RawMessage(b)})
 	if e != nil || mirrorErr != nil || len(mirror) > n {
 		f := Failure("response_limit")
 		f.Truncated = true

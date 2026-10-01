@@ -96,6 +96,15 @@ func TestDockerIPCCollisionRejected(t *testing.T) {
 	}
 }
 
+func TestAdministrativeIPCPathCannotAliasDiagnostics(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		c := dockerConfig(func(c *Config) { c.Docker.Enabled = enabled; c.AdminSocket = c.Socket })
+		if err := ValidateLinux(c); err == nil || !strings.Contains(err.Error(), "IPC paths must differ") {
+			t.Fatalf("Docker enabled=%t accepted shared IPC path: %v", enabled, err)
+		}
+	}
+}
+
 func cSocket() string { return "/run/hostlens/diagnostics.sock" }
 func cAdmin() string  { return "/run/hostlens/admin.sock" }
 

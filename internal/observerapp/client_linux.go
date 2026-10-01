@@ -29,10 +29,14 @@ type syscallStat = syscall.Stat_t
 
 func ensureObject(dec *json.Decoder) error {
 	var extra json.RawMessage
-	if err := dec.Decode(&extra); err == nil {
+	switch err := dec.Decode(&extra); err {
+	case io.EOF:
+		return nil
+	case nil:
 		return errors.New("engine response carried multiple documents")
+	default:
+		return fmt.Errorf("engine response malformed: %w", err)
 	}
-	return nil
 }
 
 // client performs fixed GET observations against one system-wide engine.
@@ -195,10 +199,9 @@ func responseCeiling(operation string) int64 {
 	}
 }
 
-// get issues one fixed GET request against the exact given path. The
-// method, Host header, and headers are fixed; the caller passes the fully
-// versioned endpoint path from the private observation table.
-func (c *client) get(ctx context.Context, path string, query url.Values, ceiling int64) ([]byte, error) {
+// engineGET keeps the method and headers fixed for both buffered observations
+// and the bounded streaming log observation.
+func engineGET(ctx context.Context, path string, query url.Values) (*http.Request, error) {
 	u := url.URL{Scheme: "http", Host: "docker", Path: path}
 	if len(query) > 0 {
 		u.RawQuery = query.Encode()
@@ -211,6 +214,16 @@ func (c *client) get(ctx context.Context, path string, query url.Values, ceiling
 	// caller-controlled data.
 	req.Host = "docker"
 	req.Header.Set("User-Agent", "hostlens-docker-observer/1")
+	return req, nil
+}
+
+// get issues one fixed GET request against the exact given path. The caller
+// passes the fully versioned endpoint path from the private observation table.
+func (c *client) get(ctx context.Context, path string, query url.Values, ceiling int64) ([]byte, error) {
+	req, err := engineGET(ctx, path, query)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -227,9 +240,9 @@ func (c *client) get(ctx context.Context, path string, query url.Values, ceiling
 	case http.StatusNotFound:
 		return nil, errEngineNotFound
 	case http.StatusNotImplemented, http.StatusBadRequest:
-		return nil, fmt.Errorf("%w: %s", errEngineUnsupported, engineErrorMessage(resp.Body))
+		return nil, fmt.Errorf("%w (%d)", errEngineUnsupported, resp.StatusCode)
 	default:
-		return nil, fmt.Errorf("engine request rejected (%d): %s", resp.StatusCode, engineErrorMessage(resp.Body))
+		return nil, fmt.Errorf("engine request rejected (%d)", resp.StatusCode)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, ceiling+1))
 	if err != nil {
@@ -244,24 +257,17 @@ func (c *client) get(ctx context.Context, path string, query url.Values, ceiling
 	return b, nil
 }
 
-func engineErrorMessage(body io.Reader) string {
-	b, _ := io.ReadAll(io.LimitReader(body, 1024))
-	var payload struct {
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(b, &payload) == nil && payload.Message != "" {
-		return payload.Message
-	}
-	return "engine response had no usable message"
-}
-
 // decodeList streams a bounded JSON array element by element so oversized
 // inventories stop before they accumulate. Truncation is reported, never
 // silently dropped, and trailing garbage is rejected.
 func decodeList[T any](data []byte, maxItems int) ([]T, bool, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
-	if _, err := dec.Token(); err != nil {
+	first, err := dec.Token()
+	if err != nil {
 		return nil, false, fmt.Errorf("engine list malformed: %w", err)
+	}
+	if first != json.Delim('[') {
+		return nil, false, errors.New("engine list malformed: array required")
 	}
 	items := make([]T, 0, min(maxItems, 64))
 	truncated := false
@@ -276,7 +282,11 @@ func decodeList[T any](data []byte, maxItems int) ([]T, bool, error) {
 		}
 		items = append(items, item)
 	}
-	if !truncated {
+	if truncated {
+		if !json.Valid(data) {
+			return items, true, errors.New("engine list malformed beyond item ceiling")
+		}
+	} else {
 		if _, err := dec.Token(); err != nil {
 			return items, truncated, fmt.Errorf("engine list malformed: %w", err)
 		}
@@ -288,15 +298,15 @@ func decodeList[T any](data []byte, maxItems int) ([]T, bool, error) {
 }
 
 func decodeObject(data []byte, out any) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return errors.New("engine response malformed: object required")
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(out); err != nil {
 		return fmt.Errorf("engine response malformed: %w", err)
 	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); err == nil {
-		return errors.New("engine response carried multiple documents")
-	}
-	return nil
+	return ensureObject(dec)
 }
 
 // ensureNegotiated performs the version probe once per process under the

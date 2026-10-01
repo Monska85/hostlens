@@ -6,34 +6,15 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Monska85/hostlens/internal/contract"
-	"golang.org/x/sys/unix"
+	"github.com/Monska85/hostlens/internal/identity"
 )
 
 func PeerUID(c net.Conn) (uint32, error) {
-	u, ok := c.(*net.UnixConn)
-	if !ok {
-		return 0, errors.New("Unix connection required")
-	}
-	raw, e := u.SyscallConn()
-	if e != nil {
-		return 0, e
-	}
-	var cred *unix.Ucred
-	var inner error
-	e = raw.Control(func(fd uintptr) { cred, inner = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED) })
-	if e != nil {
-		return 0, e
-	}
-	if inner != nil {
-		return 0, inner
-	}
-	return cred.Uid, nil
+	return identity.PeerUID(c)
 }
 
 type checkedListener struct {
@@ -101,16 +82,5 @@ func UID(name string) (uint32, error) {
 	if name == "" {
 		return uint32(os.Getuid()), nil
 	}
-	b, e := os.ReadFile("/etc/passwd")
-	if e != nil {
-		return 0, e
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		f := strings.Split(line, ":")
-		if len(f) > 2 && f[0] == name {
-			n, e := strconv.ParseUint(f[2], 10, 32)
-			return uint32(n), e
-		}
-	}
-	return 0, errors.New("configured identity not found")
+	return identity.FileID("/etc/passwd", name)
 }

@@ -21,14 +21,13 @@ func SecretIsMasked(secret string) error {
 // secretIsMasked is the pure mountinfo-based verification. It inspects only
 // the supplied mount table and the live stat identity of the masked path.
 func secretIsMasked(secret string, b []byte) error {
-	unescape := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 7 {
 			continue
 		}
-		root := unescape.Replace(f[3])
-		mount := unescape.Replace(f[4])
+		root := decodeMountField(f[3])
+		mount := decodeMountField(f[4])
 		if !strings.Contains(root, "/systemd/inaccessible/") {
 			continue
 		}

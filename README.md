@@ -118,7 +118,7 @@ Profiles constrain supported diagnostic requests, not a compromised privileged p
 
 ## ✅ Validation
 
-- Go race suite, vet, and amd64/arm64 builds in disposable containers; 85.9% internal statement coverage.
+- Go race suite, vet, and amd64/arm64 builds in disposable containers; 86.8% internal statement coverage.
 - A 12-case container acceptance matrix that extracts and executes the exact release candidate, including native arm64 systemd install/upgrade/removal on hosted runners.
 - Strict OpenSpec validation; the [specifications](openspec/specs) are authoritative.
 - Checksum-verified archives with a shipped-documentation link check; build provenance attestations activate when GitHub offers them for the repository.

@@ -3,7 +3,7 @@ SHELL := /bin/sh
 .SHELLFLAGS := -eu -c
 .DEFAULT_GOAL := help
 
-.PHONY: release-check package test-image coverage lint verify-archives scan-vulnerabilities help check deps build test fmt fmt-check lint-shell test-platforms systemd-image test-systemd-restricted test-systemd-standard
+.PHONY: release-check package test-image coverage benchmark lint verify-archives scan-vulnerabilities help check deps build test fmt fmt-check lint-shell test-platforms systemd-image test-systemd-restricted test-systemd-standard prepare-live-docker test-live-docker
 
 help:
 	@scripts/dev.sh help
@@ -24,6 +24,14 @@ package:
 test-image:
 	docker build --load -t "$${HOSTLENS_TEST_IMAGE:-hostlens-checks:local}" -f packaging/tests/Dockerfile.checks .
 
+# Explicitly prepare digest-pinned nested-engine and fixture images.
+prepare-live-docker:
+	scripts/prepare-live-docker.sh
+
+# Run the Docker observer against a private disposable engine.
+test-live-docker:
+	scripts/test-live-docker.sh
+
 # Run the Go race suite, vet and builds in a disposable container.
 test:
 	scripts/test-container.sh
@@ -31,6 +39,10 @@ test:
 # Run container checks and write Go coverage reports to coverage/.
 coverage:
 	scripts/test-container.sh coverage
+
+# Measure representative request paths in the same disposable container.
+benchmark:
+	scripts/test-container.sh benchmark
 
 # Format Go, Python and POSIX shell.
 fmt:
@@ -43,7 +55,7 @@ lint:
 	scripts/dev.sh lint
 
 lint-shell:
-	shellcheck --shell=sh scripts/*.sh
+	shellcheck -x --shell=sh scripts/*.sh
 
 # Run distribution and emulated arm64 smoke tests; requires package.
 test-platforms:

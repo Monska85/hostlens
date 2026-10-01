@@ -49,21 +49,23 @@ func validateInput(tool string, arguments json.RawMessage) error {
 	return resolved.Validate(&unmarshaled)
 }
 
-// validateOutput checks a decoded backend result envelope against the tool's
-// resolved output schema. The envelope is round-tripped through JSON first so
-// time.Time and custom marshallers validate exactly as they serialize.
-func validateOutput(definition contract.ToolDefinition, result contract.Result) error {
-	resolved, ok := resolvedOutputs[definition.Name]
-	if !ok {
-		return nil
-	}
+// validatedOutput returns the serialized result after checking its schema.
+// Validation uses the wire representation, including custom marshalers.
+func validatedOutput(definition contract.ToolDefinition, result contract.Result) ([]byte, error) {
 	b, err := json.Marshal(result)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	resolved, ok := resolvedOutputs[definition.Name]
+	if !ok {
+		return b, nil
 	}
 	var unmarshaled any
 	if err := json.Unmarshal(b, &unmarshaled); err != nil {
-		return err
+		return nil, err
 	}
-	return resolved.Validate(&unmarshaled)
+	if err := resolved.Validate(&unmarshaled); err != nil {
+		return nil, err
+	}
+	return b, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -229,6 +230,18 @@ func TestReconcileMovesObserverSocketPath(t *testing.T) {
 	if len(report.Changed) != 0 {
 		t.Fatalf("re-run after a completed move disclosed phantom changes: %+v", report.Changed)
 	}
+	// A second move must remove the previous custom path as well.
+	m.Config.Docker.ObserverSocket = "/run/hostlens/another-observer-path.sock"
+	if _, _, e := m.Reconcile(context.Background(), true); e != nil {
+		t.Fatal(e)
+	}
+	man, e = m.Load()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if r := findResource(&man, moved.Docker.ObserverSocket, "state"); r == nil || r.State != "removed" {
+		t.Fatalf("superseded custom socket retained: %+v", r)
+	}
 }
 
 func TestReconcileDisableAndReEnableReportsHonestState(t *testing.T) {
@@ -284,6 +297,212 @@ func TestReconcileRejectsPreexistingObserverIdentity(t *testing.T) {
 	}
 	if _, e := os.Stat(m.path("/etc/systemd/system/hostlens-docker-observer.service")); !errors.Is(e, os.ErrNotExist) {
 		t.Fatal("units written despite identity conflict")
+	}
+}
+
+func TestReconcileRejectsUnrecordedObserverResourcesBeforeMutation(t *testing.T) {
+	for _, path := range []string{
+		observerBinary,
+		"/etc/systemd/system/" + observerSvc,
+		"/etc/systemd/system/" + observerSock,
+		"/run/hostlens/docker-observer.sock",
+	} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			m, _, sys := reconcileFixture(t, enabledDockerConfig(t))
+			man, err := m.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := len(man.Resources) - 1; i >= 0; i-- {
+				if man.Resources[i].Path == path {
+					man.Resources = append(man.Resources[:i], man.Resources[i+1:]...)
+				}
+			}
+			if err := m.save(&man); err != nil {
+				t.Fatal(err)
+			}
+			if path != observerBinary {
+				if err := os.WriteFile(m.path(path), []byte("unowned unit"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(m.path(ManifestPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := len(sys.calls)
+			for _, apply := range []bool{false, true} {
+				if _, _, err := m.Reconcile(context.Background(), apply); err == nil || !strings.Contains(err.Error(), "lacks ownership") {
+					t.Fatalf("apply=%t accepted unowned path: %v", apply, err)
+				}
+			}
+			if len(sys.calls) != calls {
+				t.Fatalf("conflict reached service or identity commands: %v", sys.calls[calls:])
+			}
+			after, err := os.ReadFile(m.path(ManifestPath))
+			if err != nil || string(after) != string(before) {
+				t.Fatal("conflict changed manifest", err)
+			}
+		})
+	}
+}
+
+func TestReconcileRejectsResourceReplacedAfterDisablement(t *testing.T) {
+	m, source, sys := reconcileFixture(t, enabledDockerConfig(t))
+	m.Source = source
+	if _, _, err := m.Reconcile(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	m.Config.Docker.Enabled = false
+	if _, _, err := m.Reconcile(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.path(observerBinary), []byte("unowned executable"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	m.Config.Docker.Enabled = true
+	calls := len(sys.calls)
+	for _, apply := range []bool{false, true} {
+		if _, _, err := m.Reconcile(context.Background(), apply); err == nil || !strings.Contains(err.Error(), "lacks ownership") {
+			t.Fatalf("apply=%t accepted replaced binary: %v", apply, err)
+		}
+	}
+	if len(sys.calls) != calls {
+		t.Fatal("replaced binary reached service or identity commands")
+	}
+}
+
+func TestReconcileRejectsReplacedOwnedObserverFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, path string
+		replace    func(string) error
+	}{
+		{"symlink binary", observerBinary, func(path string) error { return os.Symlink("/etc/passwd", path) }},
+		{"directory unit", "/etc/systemd/system/" + observerSvc, func(path string) error { return os.Mkdir(path, 0755) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, source, sys := reconcileFixture(t, enabledDockerConfig(t))
+			m.Source = source
+			if _, _, err := m.Reconcile(context.Background(), true); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(m.path(tc.path)); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.replace(m.path(tc.path)); err != nil {
+				t.Fatal(err)
+			}
+			calls := len(sys.calls)
+			if _, _, err := m.Reconcile(context.Background(), true); err == nil || !strings.Contains(err.Error(), "unexpected observer resource type") {
+				t.Fatalf("replaced resource accepted: %v", err)
+			}
+			if len(sys.calls) != calls {
+				t.Fatal("replaced resource reached mutation commands")
+			}
+		})
+	}
+}
+
+func TestReconcileMissingBinaryNeedsSourceBeforeMutation(t *testing.T) {
+	m, _, sys := reconcileFixture(t, enabledDockerConfig(t))
+	if err := os.Remove(m.path(observerBinary)); err != nil {
+		t.Fatal(err)
+	}
+	calls := len(sys.calls)
+	if _, _, err := m.Reconcile(context.Background(), true); err == nil || !strings.Contains(err.Error(), "supply --source") {
+		t.Fatalf("missing binary accepted: %v", err)
+	}
+	if len(sys.calls) != calls {
+		t.Fatal("missing binary reached mutation commands")
+	}
+}
+
+func TestReconcileRejectsOversizedSourceBeforeMutation(t *testing.T) {
+	m, source, sys := reconcileFixture(t, enabledDockerConfig(t))
+	if err := os.Remove(m.path(observerBinary)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(filepath.Join(source, "hostlens-docker-observer"), (64<<20)+1); err != nil {
+		t.Fatal(err)
+	}
+	m.Source = source
+	calls := len(sys.calls)
+	if _, _, err := m.Reconcile(context.Background(), true); err == nil || !strings.Contains(err.Error(), "64 MiB") {
+		t.Fatalf("oversized source accepted: %v", err)
+	}
+	if len(sys.calls) != calls {
+		t.Fatal("oversized source reached mutation commands")
+	}
+}
+
+func TestReconcileResumesMatchingIntentResources(t *testing.T) {
+	m, _, _ := reconcileFixture(t, enabledDockerConfig(t))
+	man, err := m.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range man.Resources {
+		if man.Resources[i].Path == observerBinary {
+			man.Resources[i].State = "intent"
+		}
+	}
+	unit := "/etc/systemd/system/" + observerSvc
+	if err := os.WriteFile(m.path(unit), []byte(ObserverUnit(m.Config)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	man.Resources = append(man.Resources, Resource{Path: unit, Kind: "file", Owned: true, State: "intent"})
+	if err := m.save(&man); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.Reconcile(context.Background(), true); err != nil {
+		t.Fatalf("matching interrupted resources could not resume: %v", err)
+	}
+	man, err = m.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{observerBinary, unit} {
+		r := findResource(&man, path, "file")
+		if r == nil || r.State != "complete" {
+			t.Fatalf("resource did not complete: %s %+v", path, r)
+		}
+	}
+}
+
+func TestDisablePreservesReplacedObserverResources(t *testing.T) {
+	m, _, sys := reconcileFixture(t, enabledDockerConfig(t))
+	if _, _, err := m.Reconcile(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	unit := "/etc/systemd/system/" + observerSvc
+	if err := os.WriteFile(m.path(unit), []byte("unrelated service"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	socket := m.Config.Docker.ObserverSocket
+	if err := os.WriteFile(m.path(socket), []byte("unrelated endpoint"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m.Config.Docker.Enabled = false
+	if _, _, err := m.Reconcile(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{unit, socket} {
+		if _, err := os.Lstat(m.path(path)); err != nil {
+			t.Fatalf("replaced path removed: %s: %v", path, err)
+		}
+	}
+	man, err := m.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ path, kind string }{{unit, "file"}, {socket, "state"}} {
+		r := findResource(&man, item.path, item.kind)
+		if r == nil || r.State != "preserved" {
+			t.Fatalf("replaced path not preserved: %s %+v", item.path, r)
+		}
+	}
+	if !stringsContainsAny(strings.Join(sys.calls, "\n"), "disable --now "+observerSvc) {
+		t.Fatal("observer service was not disabled")
 	}
 }
 

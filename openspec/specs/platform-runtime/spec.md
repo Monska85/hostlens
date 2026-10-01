@@ -39,6 +39,11 @@ The gateway and diagnostic backend SHALL run as separate identities and independ
 - **WHEN** an authenticated IPC request names a supported operation but supplies an argument member that operation does not define
 - **THEN** the backend returns an `invalid_arguments` failure, admits no collection worker, and records no diagnostic evidence
 
+#### Scenario: Ambiguous or oversized IPC message
+
+- **WHEN** a backend or observer IPC request or response contains trailing data or exceeds its byte ceiling
+- **THEN** the receiving component rejects the message without treating a partial decode as a successful observation
+
 ### Requirement: Platform extension boundaries
 
 Shared behavior SHALL remain independent of platform-specific collectors, filesystem semantics, service identities, IPC, and reload triggers. V1 SHALL expose no macOS or Windows implementation claims.

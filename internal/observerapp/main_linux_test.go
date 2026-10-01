@@ -78,6 +78,24 @@ func TestMainRefusesUnreadableConfig(t *testing.T) {
 	}
 }
 
+func TestMainRejectsOversizedOrLinkedConfig(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(strings.Repeat(" ", (1<<20)+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Main([]string{"serve", "--config", path}); err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("oversized observer configuration accepted: %v", err)
+	}
+	linked := filepath.Join(t.TempDir(), "linked.yaml")
+	if err := os.Symlink(path, linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := Main([]string{"serve", "--config", linked}); err == nil || !strings.Contains(err.Error(), "symlinked") {
+		t.Fatalf("linked observer configuration accepted: %v", err)
+	}
+}
+
 func TestMainRefusesInvalidConfig(t *testing.T) {
 	t.Parallel()
 

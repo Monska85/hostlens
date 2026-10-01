@@ -243,6 +243,9 @@ func defaults() Config {
 // authority until the administrator enables and reconciles the topology.
 func validateDocker(c Config) error {
 	d := c.Docker
+	if c.Socket == c.AdminSocket {
+		return errors.New("diagnostic and administrative IPC paths must differ")
+	}
 	if d.Enabled && c.Mode != "system" {
 		return errors.New("docker diagnostics require system installation")
 	}
@@ -261,7 +264,7 @@ func validateDocker(c Config) error {
 			// returns, and the observer would dial its own IPC endpoint.
 			return errors.New("docker observer socket must differ from the daemon socket")
 		}
-		if d.ObserverSocket == c.Socket || d.ObserverSocket == c.AdminSocket || c.Socket == c.AdminSocket {
+		if d.ObserverSocket == c.Socket || d.ObserverSocket == c.AdminSocket {
 			return errors.New("docker observer IPC path collides with an existing socket")
 		}
 	}

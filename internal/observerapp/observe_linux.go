@@ -121,8 +121,8 @@ func (c *client) containerList(ctx context.Context) dockerobs.Response {
 		return fail(err)
 	}
 	list := make([]dockerobs.ContainerSummary, 0, len(items))
-	networks := map[string]bool{}
 	for _, s := range items {
+		networks := map[string]bool{}
 		summary := dockerobs.ContainerSummary{
 			ID: s.ID, Image: s.Image, ImageID: s.ImageID, State: s.State, Status: s.Status,
 			Created: unixTimePtr(s.Created),
@@ -280,7 +280,10 @@ func (c *client) containerStats(ctx context.Context, r dockerobs.Request) docker
 		}
 	}
 	out.PidsCurrent = s.PidsStats.Current
-	out.PidsLimit = s.PidsStats.Limit
+	if limit := s.PidsStats.Limit; limit != nil && *limit <= uint64(^uint(0)>>1) {
+		value := int(*limit)
+		out.PidsLimit = &value
+	}
 	return dockerobs.Response{Stats: &out}
 }
 
@@ -295,25 +298,26 @@ func (c *client) imageList(ctx context.Context, r dockerobs.Request) dockerobs.R
 	}
 	out := make([]dockerobs.ImageSummary, 0, len(items))
 	for _, d := range items {
-		summary := dockerobs.ImageSummary{
-			ID: d.ID, RepoTags: d.RepoTags, RepoDigests: d.RepoDigests,
-			Created: unixTimePtr(d.Created),
-		}
-		if d.Size != 0 {
-			summary.Size = &d.Size
-		}
-		if d.SharedSize > 0 {
-			summary.SharedSize = &d.SharedSize
-		}
-		if d.Containers > 0 {
-			summary.ContainerRefs = &d.Containers
-		}
-		if len(d.RepoTags) == 0 && len(d.RepoDigests) == 0 {
-			summary.Dangling = true
-		}
-		out = append(out, summary)
+		out = append(out, imageSummary(d, true))
 	}
 	return dockerobs.Response{Images: out, Truncated: truncated}
+}
+
+func imageSummary(d daemonImage, includeDaemonRefs bool) dockerobs.ImageSummary {
+	summary := dockerobs.ImageSummary{
+		ID: d.ID, RepoTags: d.RepoTags, RepoDigests: d.RepoDigests,
+		Created: unixTimePtr(d.Created), Dangling: len(d.RepoTags) == 0 && len(d.RepoDigests) == 0,
+	}
+	if d.Size != 0 {
+		summary.Size = &d.Size
+	}
+	if d.SharedSize > 0 {
+		summary.SharedSize = &d.SharedSize
+	}
+	if includeDaemonRefs && d.Containers > 0 {
+		summary.ContainerRefs = &d.Containers
+	}
+	return summary
 }
 
 func (c *client) volumeList(ctx context.Context) dockerobs.Response {
@@ -381,17 +385,7 @@ func (c *client) diskUsage(ctx context.Context) dockerobs.Response {
 	}
 	out := dockerobs.DiskUsage{LayersSize: &d.LayersSize}
 	for _, image := range d.Images {
-		summary := dockerobs.ImageSummary{
-			ID: image.ID, RepoTags: image.RepoTags, RepoDigests: image.RepoDigests,
-			Created: unixTimePtr(image.Created),
-		}
-		if image.Size != 0 {
-			summary.Size = &image.Size
-		}
-		if image.SharedSize > 0 {
-			summary.SharedSize = &image.SharedSize
-		}
-		out.Images = append(out.Images, summary)
+		out.Images = append(out.Images, imageSummary(image, false))
 	}
 	for _, container := range d.Containers {
 		ref := dockerobs.ContainerRef{ID: container.ID}

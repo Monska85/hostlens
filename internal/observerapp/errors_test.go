@@ -1,28 +1,8 @@
 package observerapp
 
 import (
-	"strings"
 	"testing"
 )
-
-func TestEngineErrorMessagePrefersDaemonPayload(t *testing.T) {
-	t.Parallel()
-
-	if got := engineErrorMessage(strings.NewReader(`{"message":"no such container"}`)); got != "no such container" {
-		t.Fatalf("daemon message lost: %q", got)
-	}
-}
-
-func TestEngineErrorMessageFallsBackWithoutJSON(t *testing.T) {
-	t.Parallel()
-
-	huge := `{"message":"` + string(make([]byte, 4096)) + `"}`
-	for _, body := range []string{"", "plain text refusal", `{"other":"field"}`, "{not json", huge} {
-		if got := engineErrorMessage(strings.NewReader(body)); got != "engine response had no usable message" {
-			t.Fatalf("fallback missing for %q: %q", body, got)
-		}
-	}
-}
 
 func TestNotFoundMarksMissingResources(t *testing.T) {
 	t.Parallel()

@@ -64,7 +64,7 @@ func (f *fakeObserver) Observe(ctx context.Context, request dockerobs.Request) (
 	return dockerobs.Response{Failed: true, Reason: "canned response missing"}, nil
 }
 
-func collectorWith(t *testing.T, allow, deny []string, observer DockerObserver) *Collector {
+func collectorWith(t testing.TB, allow, deny []string, observer DockerObserver) *Collector {
 	t.Helper()
 	c := config.DefaultsLinux(true)
 	c.Docker.Enabled = true
@@ -196,6 +196,23 @@ func TestDockerDefaultPageFitsTheResponseBudget(t *testing.T) {
 	}
 }
 
+func TestDockerPageProjectsOnlyReturnedItems(t *testing.T) {
+	t.Parallel()
+	c := &Collector{Config: config.DefaultsLinux(true)}
+	c.Config.Limits.ResponseBytes = 8192
+	c.Config.Limits.PageSize = 10
+	result := contract.Result{}
+	projected := 0
+	c.pagedProjects(&result, contract.PageArgs{Offset: 2, Limit: 2}, []int{0, 1, 2, 3, 4}, func(value int) int {
+		projected++
+		return value
+	})
+	page := result.Data.(*dockerobs.Page[int])
+	if projected != 2 || len(page.Items) != 2 || page.Items[0] != 2 || page.Items[1] != 3 || result.NextOffset == nil || *result.NextOffset != 4 {
+		t.Fatalf("page projection crossed bounds: calls=%d, page=%+v, next=%v", projected, page, result.NextOffset)
+	}
+}
+
 func mustJSONBytes(r contract.Result) []byte {
 	b, _ := json.Marshal(r)
 	return b
@@ -276,6 +293,31 @@ func TestDockerDiskUsageFiltersDeniedContainers(t *testing.T) {
 	}
 }
 
+func TestDockerDiskUsageOmitsContainersMissingFromNameInventory(t *testing.T) {
+	t.Parallel()
+	observer := &fakeObserver{
+		containers: func() []dockerobs.ContainerSummary { return nil },
+		responses: map[string]dockerobs.Response{
+			dockerobs.OpDiskUsage: {Usage: &dockerobs.DiskUsage{
+				Containers: []dockerobs.ContainerRef{{ID: runningID}},
+				Images:     []dockerobs.ImageSummary{{ID: "sha256:" + imageID(9)}},
+			}},
+		},
+	}
+	c := collectorWith(t, []string{"disk_usage", "containers", "images"}, []string{"container/secret"}, observer)
+	result := c.Collect(context.Background(), "get_docker_disk_usage", contract.NoArgs{})
+	if result.Error {
+		t.Fatal(result.Issues)
+	}
+	usage := diskUsageOf(result)
+	if len(usage.Containers) != 0 || usage.Reclaimable.ObservationStable || usage.Images[0].CurrentlyUnused {
+		t.Fatalf("unresolved container contributed evidence or unused certainty: %+v", usage)
+	}
+	if !strings.Contains(strings.Join(issueCodes(result), ","), "inventory_gap") {
+		t.Fatalf("missing inventory gap: %+v", result.Issues)
+	}
+}
+
 // TestDockerImageTagAndNetworkNameDenialsApply proves that deny rules
 // written through practical name forms exclude inventory items.
 func TestDockerImageTagAndNetworkNameDenialsApply(t *testing.T) {
@@ -339,6 +381,43 @@ func TestContainerListFiltersDeniedAndPages(t *testing.T) {
 	result = c.Collect(context.Background(), "get_docker_container", contract.ContainerArgs{Container: "web"})
 	if !result.Error || result.Issues[0].Code != "policy_denied" {
 		t.Fatalf("item observation without grant: %v", result)
+	}
+}
+
+func TestDockerContainerAliasDenialCoversAllTools(t *testing.T) {
+	t.Parallel()
+
+	item := summary(runningID, "public", "running")
+	item.Names = append(item.Names, "secret")
+	observer := &fakeObserver{
+		containers: func() []dockerobs.ContainerSummary { return []dockerobs.ContainerSummary{item} },
+		responses: map[string]dockerobs.Response{
+			dockerobs.OpDiskUsage: {Usage: &dockerobs.DiskUsage{Containers: []dockerobs.ContainerRef{{ID: runningID}}}},
+		},
+	}
+	c := collectorWith(t, []string{"containers", "disk_usage", "container/*", "stats/*", "logs/*"}, []string{"container/secret"}, observer)
+	listed := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
+	if listed.Error || len(dockerPageOf[dockerobs.ContainerPayload](listed).Items) != 0 {
+		t.Fatalf("alias-denied container listed: %+v", listed)
+	}
+	for _, tool := range []string{"get_docker_container", "get_docker_container_stats", "query_docker_logs"} {
+		var args any = contract.ContainerArgs{Container: runningID}
+		if tool == "query_docker_logs" {
+			args = contract.DockerLogsArgs{Container: runningID}
+		}
+		result := c.Collect(context.Background(), tool, args)
+		if !result.Error || len(result.Issues) == 0 || result.Issues[0].Code != "policy_denied" {
+			t.Fatalf("%s bypassed alias denial: %+v", tool, result)
+		}
+	}
+	usage := c.Collect(context.Background(), "get_docker_disk_usage", contract.NoArgs{})
+	if usage.Error || len(diskUsageOf(usage).Containers) != 0 {
+		t.Fatalf("alias-denied container appeared in disk usage: %+v", usage)
+	}
+	for _, request := range observer.requests {
+		if request.Operation == dockerobs.OpContainerDetail || request.Operation == dockerobs.OpContainerStats || request.Operation == dockerobs.OpContainerLogs {
+			t.Fatalf("denied resource observation reached Docker: %s", request.Operation)
+		}
 	}
 }
 
@@ -529,7 +608,7 @@ func TestDiskUsageReclaimableAdvisory(t *testing.T) {
 		responses: map[string]dockerobs.Response{
 			dockerobs.OpDiskUsage: {Usage: &dockerobs.DiskUsage{
 				LayersSize: int64Ptr(1000),
-				Images:     []dockerobs.ImageSummary{{ID: "sha256:" + imageID(1), Size: int64Ptr(100), SharedSize: int64Ptr(20)}, {ID: "sha256:" + imageID(9), Size: int64Ptr(100), SharedSize: int64Ptr(20)}},
+				Images:     []dockerobs.ImageSummary{{ID: "sha256:" + imageID(1), Size: int64Ptr(100), SharedSize: int64Ptr(20)}, {ID: "sha256:" + imageID(9), Size: int64Ptr(100), SharedSize: int64Ptr(20), Dangling: true}},
 				Volumes:    []dockerobs.VolumeSummary{{Name: "spare", Size: int64Ptr(50)}},
 			}},
 		},
@@ -546,6 +625,9 @@ func TestDiskUsageReclaimableAdvisory(t *testing.T) {
 	ids := usage.Reclaimable.UnusedImageIDs
 	if len(ids) != 1 || ids[0] != "sha256:"+imageID(9) {
 		t.Fatalf("reclaimable candidates wrong: %v", ids)
+	}
+	if got := usage.Reclaimable.DanglingImageIDs; len(got) != 1 || got[0] != "sha256:"+imageID(9) {
+		t.Fatalf("dangling candidates wrong: %v", got)
 	}
 	// Break the reference basis: the accounting must report non-atomic.
 	lists := 0
@@ -565,6 +647,9 @@ func TestDiskUsageReclaimableAdvisory(t *testing.T) {
 	usage = diskUsageOf(result)
 	if usage.Reclaimable.ObservationStable {
 		t.Fatal("unstable accounting must report non-atomic coverage")
+	}
+	if len(usage.Reclaimable.DanglingImageIDs) != 0 {
+		t.Fatal("unstable accounting must not report dangling cleanup candidates")
 	}
 }
 
@@ -845,4 +930,134 @@ func issueCodes(r contract.Result) []string {
 		codes = append(codes, issue.Code)
 	}
 	return codes
+}
+
+func TestTruncatedContainerInventoryFailsClosed(t *testing.T) {
+	t.Parallel()
+	observer := &fakeObserver{responses: map[string]dockerobs.Response{
+		dockerobs.OpContainerList: {Containers: []dockerobs.ContainerSummary{summary(runningID, "web", "running")}, Truncated: true},
+	}}
+	c := collectorWith(t, []string{"container/*", "stats/*", "logs/*"}, nil, observer)
+	for _, tc := range []struct {
+		tool string
+		args any
+	}{
+		{"get_docker_container", contract.ContainerArgs{Container: "web"}},
+		{"get_docker_container_stats", contract.ContainerArgs{Container: "web"}},
+		{"query_docker_logs", contract.DockerLogsArgs{Container: "web"}},
+	} {
+		result := c.Collect(context.Background(), tc.tool, tc.args)
+		if !result.Error || !containsIssue(result, "inventory_ceiling") {
+			t.Fatalf("%s accepted incomplete selector inventory: %+v", tc.tool, result)
+		}
+	}
+	for _, request := range observer.requests {
+		if request.Operation != dockerobs.OpContainerList {
+			t.Fatalf("selector crossed observer boundary after incomplete inventory: %s", request.Operation)
+		}
+	}
+	if err := c.recheckContainerAuthorization(context.Background(), "container", "web", runningID); !errors.Is(err, errIncompleteInventory) {
+		t.Fatalf("identity recheck accepted incomplete inventory: %v", err)
+	}
+}
+
+func TestContainerPolicyRecheckedAfterObservation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		tool      string
+		args      any
+		operation string
+	}{
+		{"get_docker_container", contract.ContainerArgs{Container: runningID}, dockerobs.OpContainerDetail},
+		{"get_docker_container_stats", contract.ContainerArgs{Container: runningID}, dockerobs.OpContainerStats},
+		{"query_docker_logs", contract.DockerLogsArgs{Container: runningID}, dockerobs.OpContainerLogs},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			lists := 0
+			observer := &fakeObserver{
+				containers: func() []dockerobs.ContainerSummary {
+					lists++
+					item := summary(runningID, "public", "running")
+					if lists > 1 {
+						item.Names = append(item.Names, "secret")
+					}
+					return []dockerobs.ContainerSummary{item}
+				},
+				responses: map[string]dockerobs.Response{
+					dockerobs.OpContainerDetail: {Detail: &dockerobs.ContainerDetail{ContainerSummary: summary(runningID, "public", "running")}},
+					dockerobs.OpContainerStats:  {Stats: &dockerobs.ContainerStats{Read: time.Now().UTC()}},
+					dockerobs.OpContainerLogs:   {Logs: &dockerobs.LogPage{Records: []dockerobs.LogRecord{{Stream: "stdout", Message: "private"}}}},
+				},
+			}
+			c := collectorWith(t, []string{"container/*", "stats/*", "logs/*"}, []string{"container/secret"}, observer)
+			result := c.Collect(context.Background(), tc.tool, tc.args)
+			if !result.Error || !containsIssue(result, "policy_denied") || lists != 2 {
+				t.Fatalf("%s released evidence after a denied alias appeared: %+v (lists=%d)", tc.tool, result, lists)
+			}
+			observed := false
+			for _, request := range observer.requests {
+				observed = observed || request.Operation == tc.operation
+			}
+			if !observed {
+				t.Fatalf("%s did not exercise the post-observation policy check", tc.tool)
+			}
+		})
+	}
+}
+
+func TestTruncatedReferencesSuppressUnusedConclusions(t *testing.T) {
+	t.Parallel()
+	image := dockerobs.ImageSummary{ID: "sha256:" + imageID(1), Size: int64Ptr(100)}
+	volume := dockerobs.VolumeSummary{Name: "spare", Driver: "local", Size: int64Ptr(50)}
+	observer := &fakeObserver{responses: map[string]dockerobs.Response{
+		dockerobs.OpContainerList: {Truncated: true},
+		dockerobs.OpImageList:     {Images: []dockerobs.ImageSummary{image}},
+		dockerobs.OpVolumeList:    {Volumes: []dockerobs.VolumeSummary{volume}},
+		dockerobs.OpNetworkList:   {Networks: []dockerobs.NetworkSummary{{ID: "network-id", Name: "spare-net"}}},
+		dockerobs.OpDiskUsage: {Usage: &dockerobs.DiskUsage{
+			Images: []dockerobs.ImageSummary{image}, Volumes: []dockerobs.VolumeSummary{volume},
+		}},
+	}}
+	c := collectorWith(t, []string{"images", "volumes", "networks", "disk_usage"}, nil, observer)
+	for _, tool := range []string{"list_docker_images", "list_docker_volumes", "list_docker_networks", "get_docker_disk_usage"} {
+		var args any = contract.PageArgs{}
+		if tool == "get_docker_disk_usage" {
+			args = contract.NoArgs{}
+		}
+		result := c.Collect(context.Background(), tool, args)
+		if result.Error || !result.Truncated || !containsIssue(result, "inventory_ceiling") {
+			t.Fatalf("%s hid incomplete references: %+v", tool, result)
+		}
+		switch tool {
+		case "list_docker_images":
+			row := dockerPageOf[dockerobs.ImagePayload](result).Items[0]
+			if row.ContainerReference != nil || row.CurrentlyUnused {
+				t.Fatalf("image derived certainty from incomplete references: %+v", row)
+			}
+		case "list_docker_volumes":
+			row := dockerPageOf[dockerobs.VolumePayload](result).Items[0]
+			if row.ContainerRef != nil || row.CurrentlyUnused {
+				t.Fatalf("volume derived certainty from incomplete references: %+v", row)
+			}
+		case "list_docker_networks":
+			row := dockerPageOf[dockerobs.NetworkPayload](result).Items[0]
+			if row.ContainerRef != nil {
+				t.Fatalf("network derived count from incomplete references: %+v", row)
+			}
+		case "get_docker_disk_usage":
+			usage := diskUsageOf(result)
+			if usage.Images[0].ContainerReference != nil || usage.Images[0].CurrentlyUnused || usage.Volumes[0].ContainerRef != nil || usage.Volumes[0].CurrentlyUnused || usage.Reclaimable.ObservationStable || usage.Reclaimable.UnusedImageUniqueByte != nil || usage.Reclaimable.UnusedVolumeBytes != nil || len(usage.Reclaimable.UnusedImageIDs) != 0 || len(usage.Reclaimable.UnusedVolumeNames) != 0 {
+				t.Fatalf("disk usage derived reclaimable candidates from incomplete references: %+v", usage)
+			}
+		}
+	}
+}
+
+func containsIssue(r contract.Result, code string) bool {
+	for _, issue := range r.Issues {
+		if issue.Code == code {
+			return true
+		}
+	}
+	return false
 }

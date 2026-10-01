@@ -44,9 +44,15 @@ func newTransportObserver(t *testing.T) *transportObserver {
 		o.mu.Unlock()
 		switch mode {
 		case "badrequest":
-			http.Error(w, "observation rejected", http.StatusBadRequest)
+			http.Error(w, "private upstream detail", http.StatusBadRequest)
 		case "malformed":
 			fmt.Fprint(w, "{not json")
+		case "trailing":
+			fmt.Fprint(w, `{"containers":[]} {}`)
+		case "null":
+			fmt.Fprint(w, `null`)
+		case "oversized":
+			fmt.Fprint(w, `{"containers":[]}`+strings.Repeat(" ", dockerobs.MaxListBytes+(64<<10)))
 		case "wrongversion":
 			fmt.Fprint(w, `{"version":999,"operation":"container_list"}`)
 		case "slow":
@@ -112,7 +118,7 @@ func TestObserverTransportHTTPRefusal(t *testing.T) {
 	c := transportCollector(t, NewObserverClient(o.path))
 	o.set("badrequest")
 	_, e := c.observe(context.Background(), dockerobs.Request{Version: 1, Operation: dockerobs.OpContainerList})
-	if e == nil || !strings.Contains(e.Error(), "observer rejected observation (400)") {
+	if e == nil || !strings.Contains(e.Error(), "observer rejected observation (400)") || strings.Contains(e.Error(), "private upstream detail") {
 		t.Fatalf("HTTP refusal lost: %v", e)
 	}
 	result := c.Collect(context.Background(), "list_docker_containers", contract.PageArgs{})
@@ -145,6 +151,18 @@ func TestObserverTransportMalformedBody(t *testing.T) {
 	_, e := c.observe(context.Background(), dockerobs.Request{Version: 1, Operation: dockerobs.OpContainerList})
 	if e == nil || !strings.Contains(e.Error(), "observer response unavailable") {
 		t.Fatalf("malformed body error lost: %v", e)
+	}
+}
+
+func TestObserverTransportRejectsInvalidResponseBoundary(t *testing.T) {
+	t.Parallel()
+	o := newTransportObserver(t)
+	c := transportCollector(t, NewObserverClient(o.path))
+	for _, mode := range []string{"trailing", "null", "oversized"} {
+		o.set(mode)
+		if _, err := c.observe(context.Background(), dockerobs.Request{Version: 1, Operation: dockerobs.OpContainerList}); err == nil {
+			t.Fatalf("accepted %s observer response", mode)
+		}
 	}
 }
 

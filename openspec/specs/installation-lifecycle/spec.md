@@ -6,6 +6,20 @@ Define the observable HostLens v1 installation lifecycle behavior, including sec
 
 ## Requirements
 
+### Requirement: Bounded installation state decoding
+
+Before any lifecycle mutation, HostLens SHALL read the installation manifest as exactly one JSON document within a 16 MiB byte ceiling. It SHALL reject malformed, trailing, oversized, or unknown-field state instead of acting on a partial manifest.
+
+#### Scenario: Oversized or trailing manifest
+
+- **WHEN** the installation manifest exceeds 16 MiB or contains a second JSON document
+- **THEN** lifecycle commands reject it before changing installed resources
+
+#### Scenario: Unknown installation state field
+
+- **WHEN** an installation manifest contains a field outside its declared schema
+- **THEN** lifecycle commands reject it before changing installed resources
+
 ### Requirement: Archive distribution and explicit installation
 
 V1 SHALL distribute amd64 and arm64 executable archives with example YAML, shipped profiles, and installation and upgrade instructions. Native packages SHALL be excluded. A local administrator install operation SHALL generate systemd definitions from the selected configuration, show its plan, record changes, preserve existing configuration, and refuse conflicts. Archives SHALL NOT need pre-rendered copies of those definitions. Services SHALL remain stopped unless explicitly requested.
@@ -95,6 +109,11 @@ Upgrade SHALL validate release compatibility before replacement, preserve config
 
 - **WHEN** a bundled profile changes in an upgrade
 - **THEN** the change is presented for administrator review before activation and never silently broadens access
+
+#### Scenario: Profile discovery with literal path characters
+
+- **WHEN** the installation path contains glob metacharacters or an existing profile cannot be read during upgrade
+- **THEN** bundled profile changes are still staged for review or the upgrade fails safely; they are not silently skipped
 
 #### Scenario: Irreversible change
 
@@ -260,3 +279,47 @@ Generated systemd service units SHALL deny syscall surface beyond the repository
 
 - **WHEN** the systemd acceptance suite inspects the installed units
 - **THEN** every declared sandbox directive is present on each unit it is specified for
+
+### Requirement: Observer resource ownership preflight
+
+Before planning or applying an enabled Docker observer reconciliation, HostLens SHALL verify ownership of the observer binary, service units, and IPC socket. An existing resource without a matching owned manifest record, or an owned file replaced by a symlink or other unexpected type, SHALL cause a conflict without changing identities, files, or services. A missing observer binary that requires an extracted release source SHALL be rejected before mutation when no source is supplied.
+
+#### Scenario: Unrecorded observer file
+
+- **WHEN** a binary or service unit already exists but its ownership is absent from the installation manifest
+- **THEN** both dry run and apply report a conflict and preserve the resource without granting Docker access
+
+#### Scenario: Unrecorded observer socket
+
+- **WHEN** the configured observer IPC path exists without a matching owned manifest record
+- **THEN** both dry run and apply reject reconciliation before service or identity changes
+
+#### Scenario: Unexpected type at an owned path
+
+- **WHEN** an owned observer binary or unit is replaced by a symlink or directory
+- **THEN** reconciliation reports the unexpected resource and preserves it
+
+#### Scenario: Older installation lacks observer binary
+
+- **WHEN** the observer binary is missing and the manifest has no completed observer binary record, while no extracted release source is supplied
+- **THEN** apply fails before creating the observer identity or units and explains the required source
+
+#### Scenario: Unusable observer binary source
+
+- **WHEN** a missing observer binary requires a source that is absent, non-regular, empty, or larger than the release member ceiling
+- **THEN** apply fails before creating the observer identity or units
+
+#### Scenario: Interrupted owned write
+
+- **WHEN** an interrupted observer binary or unit write left an owned intent record and matching recorded or generated content
+- **THEN** reconciliation can finish that resource without adopting different content
+
+#### Scenario: Owned observer resource
+
+- **WHEN** the observer binary, units, and socket have matching owned records and expected resource types
+- **THEN** reconciliation may update or remove those resources under the existing lifecycle rules
+
+#### Scenario: Repeated custom observer socket moves
+
+- **WHEN** an owned observer IPC socket moves between custom path names
+- **THEN** reconciliation removes and records the old socket path before enabling the new one

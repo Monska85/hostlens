@@ -17,6 +17,7 @@ import (
 
 	"github.com/Monska85/hostlens/internal/backend"
 	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/jsondoc"
 	"github.com/Monska85/hostlens/internal/telemetry"
 	"github.com/Monska85/hostlens/internal/token"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -63,12 +64,20 @@ func RestartFingerprint(s backend.Snapshot) (string, error) {
 	values := []any{c.Server, c.Mode, c.Privilege, c.TokenStore, c.Socket, c.AdminSocket, c.GatewayUser, c.DiagnosticsUser, c.Limits.IdleTimeout, c.Docker}
 	if c.Server.TLS.Enabled {
 		for _, p := range []string{c.Server.TLS.KeyFile, c.Server.TLS.CertFile} {
-			b, e := os.ReadFile(p)
+			f, e := os.Open(p)
 			if e != nil {
 				return "", e
 			}
-			h := sha256.Sum256(b)
-			values = append(values, hex.EncodeToString(h[:]))
+			h := sha256.New()
+			_, e = io.Copy(h, f)
+			closeErr := f.Close()
+			if e != nil {
+				return "", e
+			}
+			if closeErr != nil {
+				return "", closeErr
+			}
+			values = append(values, hex.EncodeToString(h.Sum(nil)))
 		}
 	}
 	b, _ := json.Marshal(values)
@@ -99,7 +108,7 @@ func (c *Coordinator) rpc(ctx context.Context, path string, in, out any) error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("backend rejected %s (%d)", path, resp.StatusCode)
 	}
-	err := json.NewDecoder(io.LimitReader(resp.Body, maxBackendResponseBytes)).Decode(out)
+	err := jsondoc.Decode(resp.Body, maxBackendResponseBytes, out)
 	if err != nil && ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
@@ -121,14 +130,39 @@ func (c *Coordinator) sync(ctx context.Context, s backend.Snapshot) error {
 		return e
 	}
 	if status.Generation == s.Generation {
+		if status.Fingerprint != s.Fingerprint {
+			return errors.New("backend fingerprint differs from active generation")
+		}
 		return nil
 	}
-	var ack map[string]bool
-	want := map[string]string{"generation": s.Generation}
-	if e := c.rpc(ctx, "/prepare", want, &ack); e != nil {
-		return e
+	return c.activateBackend(ctx, s.Generation)
+}
+
+// activateBackend requires positive replies from both phases before the
+// gateway can treat the requested generation as active.
+func (c *Coordinator) activateBackend(ctx context.Context, generation string) error {
+	want := struct {
+		Generation string `json:"generation"`
+	}{Generation: generation}
+	var prepared struct {
+		Prepared bool `json:"prepared"`
 	}
-	return c.rpc(ctx, "/activate", want, &ack)
+	if err := c.rpc(ctx, "/prepare", want, &prepared); err != nil {
+		return err
+	}
+	if !prepared.Prepared {
+		return errors.New("backend did not acknowledge preparation")
+	}
+	var activated struct {
+		Active bool `json:"active"`
+	}
+	if err := c.rpc(ctx, "/activate", want, &activated); err != nil {
+		return err
+	}
+	if !activated.Active {
+		return errors.New("backend did not acknowledge activation")
+	}
+	return nil
 }
 func (c *Coordinator) Call(ctx context.Context, tool string, args json.RawMessage, id string) (result contract.Result, err error) {
 	if err := context.Cause(ctx); err != nil {
@@ -152,15 +186,21 @@ func (c *Coordinator) Call(ctx context.Context, tool string, args json.RawMessag
 	if !toolAdmitted(definition, known, snapshot.Config.MCP.ReadOnly) {
 		return contract.Failure("operation_denied"), errors.New("operation is not admitted")
 	}
-	if e := c.sync(ctx, snapshot); e != nil {
-		return backendFailure(e), e
-	}
 	req := contract.Request{Version: 1, ID: id, Generation: snapshot.Generation, Tool: tool, Args: args}
 	e := c.rpc(ctx, "/call", req, &result)
 	if e != nil {
 		return backendFailure(e), e
 	}
-	return result, e
+	if len(result.Issues) == 1 && result.Error && result.Issues[0].Code == "generation_mismatch" {
+		if e := c.sync(ctx, snapshot); e != nil {
+			return backendFailure(e), e
+		}
+		result = contract.Result{}
+		if e := c.rpc(ctx, "/call", req, &result); e != nil {
+			return backendFailure(e), e
+		}
+	}
+	return result, nil
 }
 func (c *Coordinator) Reload(ctx context.Context) error {
 	c.operations.Lock()
@@ -198,12 +238,7 @@ func (c *Coordinator) Reload(ctx context.Context) error {
 			transition.Rollback()
 		}
 	}()
-	var ack map[string]bool
-	want := map[string]string{"generation": candidate.Generation}
-	if e = c.rpc(ctx, "/prepare", want, &ack); e != nil {
-		return e
-	}
-	if e = c.rpc(ctx, "/activate", want, &ack); e != nil {
+	if e = c.activateBackend(ctx, candidate.Generation); e != nil {
 		return e
 	}
 	c.mu.Lock()
@@ -337,14 +372,19 @@ func (c *Coordinator) MCP(ctx context.Context, identity token.Record) *mcp.Serve
 			start := time.Now()
 			result, e := c.Call(ctx, name, req.Params.Arguments, id)
 			outcome := "success"
+			var payload []byte
 			if e != nil {
 				result = backendFailure(e)
 				outcome = result.Issues[0].Code
-			} else if verr := validateOutput(definition, result); verr != nil {
-				result = contract.Failure("response_shape")
-				outcome = "response_shape"
-			} else if len(result.Issues) > 0 {
-				outcome = "issues"
+			} else {
+				var verr error
+				payload, verr = validatedOutput(definition, result)
+				if verr != nil {
+					result = contract.Failure("response_shape")
+					outcome = "response_shape"
+				} else if len(result.Issues) > 0 {
+					outcome = "issues"
+				}
 			}
 			c.mu.RLock()
 			audit := c.Active.Config.Logging.AuditSuccessfulCalls
@@ -359,9 +399,12 @@ func (c *Coordinator) MCP(ctx context.Context, identity token.Record) *mcp.Serve
 				record := contract.AuditRecord{Component: "gateway", RequestID: id, TokenID: identity.ID, Tool: name, Outcome: outcome, PeerIP: peer, ClientIP: client, Duration: time.Since(start)}
 				c.Log.Log(ctx, level, "tool_call", record.Attributes()...)
 			}
-			payload, err := json.Marshal(result)
-			if err != nil {
-				return nil, err
+			if payload == nil {
+				var err error
+				payload, err = json.Marshal(result)
+				if err != nil {
+					return nil, err
+				}
 			}
 			return &mcp.CallToolResult{
 				IsError:           result.Error,

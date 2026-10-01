@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/Monska85/hostlens/internal/contract"
 	"github.com/Monska85/hostlens/internal/dockerobs"
+	"github.com/Monska85/hostlens/internal/jsondoc"
 )
 
 // DockerObserver transport. The diagnostic backend reaches the isolated
@@ -60,17 +60,20 @@ func (o *observerClient) Observe(ctx context.Context, request dockerobs.Request)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return dockerobs.Response{}, fmt.Errorf("observer rejected observation (%d): %s", resp.StatusCode, string(detail))
+		return dockerobs.Response{}, fmt.Errorf("observer rejected observation (%d)", resp.StatusCode)
 	}
-	var response dockerobs.Response
-	if e := json.NewDecoder(io.LimitReader(resp.Body, dockerobs.MaxListBytes+64<<10)).Decode(&response); e != nil {
+	var response *dockerobs.Response
+	e = jsondoc.Decode(resp.Body, dockerobs.MaxListBytes+(64<<10), &response)
+	if e == nil && response == nil {
+		e = errors.New("observer response must be an object")
+	}
+	if e != nil {
 		if ctx.Err() != nil {
 			return dockerobs.Response{}, context.Cause(ctx)
 		}
 		return dockerobs.Response{}, fmt.Errorf("observer response unavailable: %w", e)
 	}
-	return response, nil
+	return *response, nil
 }
 
 // NewObserverClient prepares the typed observer transport for composition.

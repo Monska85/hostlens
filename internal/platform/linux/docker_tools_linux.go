@@ -13,6 +13,8 @@ import (
 )
 
 var errAmbiguous = errors.New("selector is ambiguous")
+var errIncompleteInventory = errors.New("container inventory exceeded observation ceiling")
+var errPolicyChanged = errors.New("container policy changed during observation")
 
 // resolveContainer matches a selector against one bounded live inventory.
 // Full stable identities, unambiguous hexadecimal prefixes, and exact
@@ -71,6 +73,8 @@ func selectorFailure(r *contract.Result, selector string, err error) {
 	switch {
 	case errors.Is(err, errAmbiguous):
 		code = "ambiguous_selector"
+	case errors.Is(err, errIncompleteInventory):
+		code = "inventory_ceiling"
 	case strings.Contains(err.Error(), "unsafe"):
 		code = "invalid_selector"
 	}
@@ -117,51 +121,44 @@ func containerFingerprint(items []dockerobs.ContainerSummary) dockerobs.StableFi
 // changed, it retries once within the request deadline; persistent
 // instability keeps observations but never classifies uncertain resources
 // as unused.
-func (c *Collector) correlatedInventory(ctx context.Context, operation string) (dockerobs.Response, []dockerobs.ContainerSummary, bool, error) {
-	observeContainers := func() (dockerobs.Response, error) {
-		return c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerList})
+func (c *Collector) correlatedInventory(ctx context.Context, operation string) (dockerobs.Response, []dockerobs.ContainerSummary, bool, bool, error) {
+	observe := func(op string) (dockerobs.Response, error) {
+		response, err := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: op})
+		if err != nil {
+			return dockerobs.Response{}, err
+		}
+		if response.Failed {
+			return dockerobs.Response{}, errors.New(response.Reason)
+		}
+		return response, nil
 	}
-	before, e := observeContainers()
-	if e != nil {
-		return dockerobs.Response{}, nil, false, e
+	before, err := observe(dockerobs.OpContainerList)
+	if err != nil {
+		return dockerobs.Response{}, nil, false, false, err
 	}
-	if before.Failed {
-		return dockerobs.Response{}, nil, false, errors.New(before.Reason)
+	for attempt := 0; ; attempt++ {
+		response, err := observe(operation)
+		if err != nil {
+			return dockerobs.Response{}, nil, false, false, err
+		}
+		after, err := observe(dockerobs.OpContainerList)
+		if err != nil {
+			return dockerobs.Response{}, nil, false, false, err
+		}
+		if before.Truncated || after.Truncated {
+			return response, after.Containers, false, true, nil
+		}
+		stable := containerFingerprint(before.Containers).Equal(containerFingerprint(after.Containers))
+		if stable || attempt == 1 {
+			return response, after.Containers, stable, false, nil
+		}
+		before = after
 	}
-	response, e := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: operation})
-	if e != nil {
-		return dockerobs.Response{}, nil, false, e
-	}
-	if response.Failed {
-		return dockerobs.Response{}, nil, false, errors.New(response.Reason)
-	}
-	after, e := observeContainers()
-	if e != nil {
-		return dockerobs.Response{}, nil, false, e
-	}
-	if after.Failed {
-		return dockerobs.Response{}, nil, false, errors.New(after.Reason)
-	}
-	stable := containerFingerprint(before.Containers).Equal(containerFingerprint(after.Containers))
-	if stable {
-		return response, after.Containers, true, nil
-	}
-	retry, e := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: operation})
-	if e != nil {
-		return dockerobs.Response{}, nil, false, e
-	}
-	if retry.Failed {
-		return dockerobs.Response{}, nil, false, errors.New(retry.Reason)
-	}
-	afterRetry, e := observeContainers()
-	if e != nil {
-		return dockerobs.Response{}, nil, false, e
-	}
-	if afterRetry.Failed {
-		return dockerobs.Response{}, nil, false, errors.New(afterRetry.Reason)
-	}
-	stable = containerFingerprint(after.Containers).Equal(containerFingerprint(afterRetry.Containers))
-	return retry, afterRetry.Containers, stable, nil
+}
+
+func incompleteDockerReferences(r *contract.Result) {
+	r.Truncated = true
+	r.Issue("inventory_ceiling", r.Source, "container reference inventory exceeded the observation ceiling; derived counts and unused state are unavailable")
 }
 
 // resolveContainerLive resolves one selector against the live inventory.
@@ -173,16 +170,35 @@ func (c *Collector) resolveContainerLive(ctx context.Context, selector string) (
 	if response.Failed {
 		return "", nil, errors.New(response.Reason)
 	}
+	if response.Truncated {
+		return "", nil, errIncompleteInventory
+	}
 	return resolveContainer(response.Containers, selector)
 }
 
-// recheckContainerIdentity verifies the selector still resolves to the same
-// stable identity after an observation, so name reuse mid-request cannot
-// release evidence for an unauthorized replacement.
-func (c *Collector) recheckContainerIdentity(ctx context.Context, selector, id string) error {
-	if dockerobs.ValidID(selector) {
-		return nil
+// authorizedContainer resolves a live identity and applies every current
+// name denial before a resource-specific observation can reach the observer.
+func (c *Collector) authorizedContainer(ctx context.Context, r *contract.Result, kind, selector string) (string, *dockerobs.ContainerSummary, bool) {
+	if selector == "" {
+		r.Error = true
+		r.Issue("invalid_selector", "", "one container selector is required")
+		return "", nil, false
 	}
+	id, summary, err := c.resolveContainerLive(ctx, selector)
+	if err != nil {
+		selectorFailure(r, selector, err)
+		return "", nil, false
+	}
+	if !c.Policy.DockerDecision(kind, selector, id, summary.Names...) {
+		deniedResult(r, kind, selector)
+		return "", nil, false
+	}
+	return id, summary, true
+}
+
+// recheckContainerAuthorization verifies identity and all current names after
+// an observation. Even a stable ID can gain a denied alias mid-request.
+func (c *Collector) recheckContainerAuthorization(ctx context.Context, kind, selector, id string) error {
 	response, e := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerList})
 	if e != nil {
 		return fmt.Errorf("identity recheck unavailable: %w", e)
@@ -190,20 +206,37 @@ func (c *Collector) recheckContainerIdentity(ctx context.Context, selector, id s
 	if response.Failed {
 		return fmt.Errorf("identity recheck unavailable: %s", response.Reason)
 	}
-	current, _, e := resolveContainer(response.Containers, selector)
+	if response.Truncated {
+		return errIncompleteInventory
+	}
+	current, summary, e := resolveContainer(response.Containers, selector)
 	if e != nil {
 		return fmt.Errorf("selector no longer resolves to the observed identity: %w", e)
 	}
 	if current != id {
 		return errors.New("selector now resolves to a different container identity")
 	}
+	if !c.Policy.DockerDecision(kind, selector, id, summary.Names...) {
+		return errPolicyChanged
+	}
 	return nil
 }
 
-// imageDenied evaluates one image against its stable identity and every
+func recheckFailure(r *contract.Result, selector string, err error) {
+	r.Error = true
+	code := "identity_changed"
+	if errors.Is(err, errPolicyChanged) {
+		code = "policy_denied"
+	} else if errors.Is(err, errIncompleteInventory) {
+		code = "inventory_ceiling"
+	}
+	r.Issue(code, selector, err.Error())
+}
+
+// imageExcluded evaluates one image against its stable identity and every
 // practical tag or digest form; denial through any form excludes it.
-func imageDenied(p *policy.Policy, image dockerobs.ImageSummary) bool {
-	if !p.DockerListDecision("image", firstImageSelector(image), image.ID, "images") {
+func imageExcluded(p *policy.Policy, image dockerobs.ImageSummary, collectionGranted bool) bool {
+	if !p.DockerListDecision("image", firstImageSelector(image), image.ID, collectionGranted) {
 		return true
 	}
 	for _, tag := range image.RepoTags {
@@ -227,19 +260,32 @@ func firstImageSelector(image dockerobs.ImageSummary) string {
 }
 
 // containerReferences indexes current references from the live inventory.
-func containerReferences(containers []dockerobs.ContainerSummary) (map[string]int, map[string]int, map[string]int) {
-	images := map[string]int{}
-	volumes := map[string]int{}
-	networks := map[string]int{}
+func containerReferences(containers []dockerobs.ContainerSummary, includeImages, includeVolumes, includeNetworks bool) (map[string]int, map[string]int, map[string]int) {
+	var images, volumes, networks map[string]int
+	if includeImages {
+		images = make(map[string]int, len(containers))
+	}
 	for _, item := range containers {
-		images[item.ImageID]++
-		for _, m := range item.Mounts {
-			if m.Type == "volume" && m.VolumeName != "" {
-				volumes[m.VolumeName]++
+		if includeImages {
+			images[item.ImageID]++
+		}
+		if includeVolumes {
+			for _, m := range item.Mounts {
+				if m.Type == "volume" && m.VolumeName != "" {
+					if volumes == nil {
+						volumes = make(map[string]int)
+					}
+					volumes[m.VolumeName]++
+				}
 			}
 		}
-		for _, n := range item.Networks {
-			networks[n]++
+		if includeNetworks {
+			for _, n := range item.Networks {
+				if networks == nil {
+					networks = make(map[string]int)
+				}
+				networks[n]++
+			}
 		}
 	}
 	return images, volumes, networks
@@ -257,7 +303,7 @@ func firstContainerName(s dockerobs.ContainerSummary) string {
 // rows. The default page derives from the response ceiling so a full
 // observation never discards the whole result at the backend output bound;
 // explicit limits above the budget clamp with a next page instead.
-func (c *Collector) pagedProjects[T any](r *contract.Result, a contract.PageArgs, items []T) {
+func (c *Collector) pagedProjects[S, T any](r *contract.Result, a contract.PageArgs, items []S, project func(S) T) {
 	budget := c.Config.Limits.ResponseBytes / 2048
 	if budget < 1 {
 		budget = 1
@@ -276,11 +322,9 @@ func (c *Collector) pagedProjects[T any](r *contract.Result, a contract.PageArgs
 	}
 	start := min(a.Offset, len(items))
 	end := min(start+limit, len(items))
-	page := dockerobs.Page[T]{SnapshotConsistent: false}
-	if len(items) == 0 {
-		page.Items = items
-	} else {
-		page.Items = items[start:end]
+	page := dockerobs.Page[T]{Items: make([]T, 0, end-start), SnapshotConsistent: false}
+	for _, item := range items[start:end] {
+		page.Items = append(page.Items, project(item))
 	}
 	r.Data = &page
 	if end < len(items) {
@@ -424,19 +468,16 @@ func (c *Collector) dockerContainers(ctx context.Context, r *contract.Result, a 
 	}
 	filtered := 0
 	kept := make([]dockerobs.ContainerSummary, 0, len(response.Containers))
+	collectionGranted := c.Policy.Allowed("docker", "containers", false)
 	for _, item := range response.Containers {
-		if !c.Policy.DockerListDecision("container", firstContainerName(item), item.ID, "containers") {
+		if !c.Policy.DockerListDecision("container", firstContainerName(item), item.ID, collectionGranted, item.Names...) {
 			filtered++
 			continue
 		}
 		kept = append(kept, item)
 	}
 	dockerobs.SortContainerIDs(kept)
-	items := make([]dockerobs.ContainerPayload, 0, len(kept))
-	for i := range kept {
-		items = append(items, dockerobs.ToContainer(kept[i]))
-	}
-	c.pagedProjects(r, a, items)
+	c.pagedProjects(r, a, kept, dockerobs.ToContainer)
 	if filtered > 0 {
 		r.Issue("policy_filtered", "docker", fmt.Sprintf("%d containers omitted by explicit denial", filtered))
 	}
@@ -444,18 +485,8 @@ func (c *Collector) dockerContainers(ctx context.Context, r *contract.Result, a 
 }
 
 func (c *Collector) dockerContainer(ctx context.Context, r *contract.Result, a contract.ContainerArgs) contract.Result {
-	if a.Container == "" {
-		r.Error = true
-		r.Issue("invalid_selector", "", "one container selector is required")
-		return *r
-	}
-	id, _, e := c.resolveContainerLive(ctx, a.Container)
-	if e != nil {
-		selectorFailure(r, a.Container, e)
-		return *r
-	}
-	if !c.Policy.DockerDecision("container", a.Container, id) {
-		deniedResult(r, "container", a.Container)
+	id, _, ok := c.authorizedContainer(ctx, r, "container", a.Container)
+	if !ok {
 		return *r
 	}
 	response, e := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerDetail, Selector: id})
@@ -471,9 +502,8 @@ func (c *Collector) dockerContainer(ctx context.Context, r *contract.Result, a c
 		r.Issue("identity_changed", a.Container, "resolved identity did not match the observed container")
 		return *r
 	}
-	if e := c.recheckContainerIdentity(ctx, a.Container, id); e != nil {
-		r.Error = true
-		r.Issue("identity_changed", a.Container, e.Error())
+	if e := c.recheckContainerAuthorization(ctx, "container", a.Container, id); e != nil {
+		recheckFailure(r, a.Container, e)
 		return *r
 	}
 	detail := dockerobs.ToContainerDetail(response.Detail)
@@ -482,18 +512,8 @@ func (c *Collector) dockerContainer(ctx context.Context, r *contract.Result, a c
 }
 
 func (c *Collector) dockerStats(ctx context.Context, r *contract.Result, a contract.ContainerArgs) contract.Result {
-	if a.Container == "" {
-		r.Error = true
-		r.Issue("invalid_selector", "", "one container selector is required")
-		return *r
-	}
-	id, summary, e := c.resolveContainerLive(ctx, a.Container)
-	if e != nil {
-		selectorFailure(r, a.Container, e)
-		return *r
-	}
-	if !c.Policy.DockerDecision("stats", a.Container, id) {
-		deniedResult(r, "stats", a.Container)
+	id, summary, ok := c.authorizedContainer(ctx, r, "stats", a.Container)
+	if !ok {
 		return *r
 	}
 	response, e := c.observe(ctx, dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerStats, Selector: id})
@@ -509,9 +529,8 @@ func (c *Collector) dockerStats(ctx context.Context, r *contract.Result, a contr
 		r.Issue("docker_unavailable", a.Container, "observer returned no stats projection")
 		return *r
 	}
-	if e := c.recheckContainerIdentity(ctx, a.Container, id); e != nil {
-		r.Error = true
-		r.Issue("identity_changed", a.Container, e.Error())
+	if e := c.recheckContainerAuthorization(ctx, "stats", a.Container, id); e != nil {
+		recheckFailure(r, a.Container, e)
 		return *r
 	}
 	stats := dockerobs.ToContainerStats(response.Stats)
@@ -523,7 +542,7 @@ func (c *Collector) dockerStats(ctx context.Context, r *contract.Result, a contr
 }
 
 func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
-	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpImageList)
+	response, containers, stable, incomplete, e := c.correlatedInventory(ctx, dockerobs.OpImageList)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
 	}
@@ -531,30 +550,34 @@ func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a cont
 		r.Truncated = true
 		r.Issue("inventory_ceiling", r.Source, "image inventory exceeded the observation ceiling")
 	}
-	refs, _, _ := containerReferences(containers)
+	if incomplete {
+		incompleteDockerReferences(r)
+	}
+	refs, _, _ := containerReferences(containers, true, false, false)
 	filtered := 0
 	kept := make([]dockerobs.ImageSummary, 0, len(response.Images))
+	collectionGranted := c.Policy.Allowed("docker", "images", false)
 	for _, item := range response.Images {
 		// Every tag is a practical identity: denial through any tag form
 		// excludes the image from the inventory.
-		if imageDenied(c.Policy, item) {
+		if imageExcluded(c.Policy, item, collectionGranted) {
 			filtered++
 			continue
 		}
-		count := refs[item.ID]
-		item.ContainerRefs = &count
-		item.CurrentlyUnused = stable && count == 0
 		kept = append(kept, item)
 	}
-	if !stable && len(response.Images) > 0 {
+	if !stable && !incomplete && len(response.Images) > 0 {
 		r.Issue("non_atomic_observation", r.Source, "container references changed during collection; unused state is uncertain")
 	}
 	dockerobs.SortImageIDs(kept)
-	items := make([]dockerobs.ImagePayload, 0, len(kept))
-	for i := range kept {
-		items = append(items, dockerobs.ToImage(kept[i]))
-	}
-	c.pagedProjects(r, a, items)
+	c.pagedProjects(r, a, kept, func(item dockerobs.ImageSummary) dockerobs.ImagePayload {
+		count := refs[item.ID]
+		if !incomplete {
+			item.ContainerRefs = &count
+		}
+		item.CurrentlyUnused = stable && count == 0
+		return dockerobs.ToImage(item)
+	})
 	if filtered > 0 {
 		r.Issue("policy_filtered", "docker", fmt.Sprintf("%d images omitted by explicit denial", filtered))
 	}
@@ -562,7 +585,7 @@ func (c *Collector) dockerImages(ctx context.Context, r *contract.Result, a cont
 }
 
 func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
-	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpVolumeList)
+	response, containers, stable, incomplete, e := c.correlatedInventory(ctx, dockerobs.OpVolumeList)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
 	}
@@ -570,32 +593,33 @@ func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a con
 		r.Truncated = true
 		r.Issue("inventory_ceiling", r.Source, "volume inventory exceeded the observation ceiling")
 	}
-	_, refs, _ := containerReferences(containers)
+	if incomplete {
+		incompleteDockerReferences(r)
+	}
+	_, refs, _ := containerReferences(containers, false, true, false)
 	filtered := 0
 	kept := make([]dockerobs.VolumeSummary, 0, len(response.Volumes))
+	collectionGranted := c.Policy.Allowed("docker", "volumes", false)
 	for _, item := range response.Volumes {
-		if !c.Policy.DockerListDecision("volume", item.Name, item.Name, "volumes") {
+		if !c.Policy.DockerListDecision("volume", item.Name, item.Name, collectionGranted) {
 			filtered++
 			continue
 		}
-		if item.RefCount == nil {
-			count := refs[item.Name]
-			item.RefCount = &count
-		}
-		// A daemon-supplied reference count is current evidence; a derived
-		// count replaces it only when the daemon supplied none.
-		item.CurrentlyUnused = stable && item.RefCount != nil && *item.RefCount == 0
 		kept = append(kept, item)
 	}
-	if !stable && len(response.Volumes) > 0 {
+	if !stable && !incomplete && len(response.Volumes) > 0 {
 		r.Issue("non_atomic_observation", r.Source, "container references changed during collection; unused state is uncertain")
 	}
 	dockerobs.SortVolumeNames(kept)
-	items := make([]dockerobs.VolumePayload, 0, len(kept))
-	for i := range kept {
-		items = append(items, dockerobs.ToVolume(kept[i]))
-	}
-	c.pagedProjects(r, a, items)
+	c.pagedProjects(r, a, kept, func(item dockerobs.VolumeSummary) dockerobs.VolumePayload {
+		if item.RefCount == nil && !incomplete {
+			count := refs[item.Name]
+			item.RefCount = &count
+		}
+		// A daemon-supplied count takes precedence over mount correlation.
+		item.CurrentlyUnused = stable && item.RefCount != nil && *item.RefCount == 0
+		return dockerobs.ToVolume(item)
+	})
 	if filtered > 0 {
 		r.Issue("policy_filtered", "docker", fmt.Sprintf("%d volumes omitted by explicit denial", filtered))
 	}
@@ -603,7 +627,7 @@ func (c *Collector) dockerVolumes(ctx context.Context, r *contract.Result, a con
 }
 
 func (c *Collector) dockerNetworks(ctx context.Context, r *contract.Result, a contract.PageArgs) contract.Result {
-	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpNetworkList)
+	response, containers, stable, incomplete, e := c.correlatedInventory(ctx, dockerobs.OpNetworkList)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
 	}
@@ -611,28 +635,32 @@ func (c *Collector) dockerNetworks(ctx context.Context, r *contract.Result, a co
 		r.Truncated = true
 		r.Issue("inventory_ceiling", r.Source, "network inventory exceeded the observation ceiling")
 	}
-	_, _, netRefs := containerReferences(containers)
+	if incomplete {
+		incompleteDockerReferences(r)
+	}
+	_, _, netRefs := containerReferences(containers, false, false, true)
 	filtered := 0
 	kept := make([]dockerobs.NetworkSummary, 0, len(response.Networks))
+	collectionGranted := c.Policy.Allowed("docker", "networks", false)
 	for _, item := range response.Networks {
 		// The current name is a practical identity for deny precedence.
-		if !c.Policy.DockerListDecision("network", item.Name, item.ID, "networks") {
+		if !c.Policy.DockerListDecision("network", item.Name, item.ID, collectionGranted) {
 			filtered++
 			continue
 		}
-		count := netRefs[item.Name]
-		item.ContainerRefs = &count
 		kept = append(kept, item)
 	}
-	if !stable && len(response.Networks) > 0 {
+	if !stable && !incomplete && len(response.Networks) > 0 {
 		r.Issue("non_atomic_observation", r.Source, "container references changed during collection; unused state is uncertain")
 	}
 	dockerobs.SortNetworkIDs(kept)
-	items := make([]dockerobs.NetworkPayload, 0, len(kept))
-	for i := range kept {
-		items = append(items, dockerobs.ToNetwork(kept[i]))
-	}
-	c.pagedProjects(r, a, items)
+	c.pagedProjects(r, a, kept, func(item dockerobs.NetworkSummary) dockerobs.NetworkPayload {
+		if !incomplete {
+			count := netRefs[item.Name]
+			item.ContainerRefs = &count
+		}
+		return dockerobs.ToNetwork(item)
+	})
 	if filtered > 0 {
 		r.Issue("policy_filtered", "docker", fmt.Sprintf("%d networks omitted by explicit denial", filtered))
 	}
@@ -640,7 +668,7 @@ func (c *Collector) dockerNetworks(ctx context.Context, r *contract.Result, a co
 }
 
 func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) contract.Result {
-	response, containers, stable, e := c.correlatedInventory(ctx, dockerobs.OpDiskUsage)
+	response, containers, stable, incomplete, e := c.correlatedInventory(ctx, dockerobs.OpDiskUsage)
 	if e != nil {
 		return c.dockerUnavailable(ctx, e)
 	}
@@ -653,20 +681,41 @@ func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) con
 		deniedResult(r, "disk_usage", "")
 		return *r
 	}
-	refs, volumeRefs, _ := containerReferences(containers)
+	if incomplete {
+		incompleteDockerReferences(r)
+	}
+	refs, volumeRefs, _ := containerReferences(containers, true, true, false)
+	containersByID := make(map[string]*dockerobs.ContainerSummary, len(containers))
+	for i := range containers {
+		containersByID[containers[i].ID] = &containers[i]
+	}
 	usage := response.Usage
+	unknownContainers := 0
+	for _, item := range usage.Containers {
+		if containersByID[item.ID] == nil {
+			unknownContainers++
+		}
+	}
+	if unknownContainers > 0 {
+		stable = false
+	}
 	reclaimable := &dockerobs.Reclaimable{ObservationStable: stable}
 	var unusedImageBytes, unusedVolumeBytes int64
 	var unusedImages, unusedVolumes, dangling []string
 	filteredImages, filteredContainers := 0, 0
+	imagesGranted := c.Policy.Allowed("docker", "images", false)
+	containersGranted := c.Policy.Allowed("docker", "containers", false)
+	volumesGranted := c.Policy.Allowed("docker", "volumes", false)
 	keptImages := make([]dockerobs.ImageSummary, 0, len(usage.Images))
 	for _, image := range usage.Images {
-		if imageDenied(c.Policy, image) {
+		if imageExcluded(c.Policy, image, imagesGranted) {
 			filteredImages++
 			continue
 		}
 		count := refs[image.ID]
-		image.ContainerRefs = &count
+		if !incomplete {
+			image.ContainerRefs = &count
+		}
 		image.CurrentlyUnused = stable && count == 0
 		if image.CurrentlyUnused {
 			estimate := image.Size
@@ -690,12 +739,12 @@ func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) con
 	usage.Images = keptImages
 	keptContainers := make([]dockerobs.ContainerRef, 0, len(usage.Containers))
 	for _, container := range usage.Containers {
-		summary, ok := containerByID(containers, container.ID)
-		name := ""
-		if ok {
-			name = firstContainerName(*summary)
+		summary, ok := containersByID[container.ID]
+		if !ok {
+			// Without the live names, name-based denials cannot be checked.
+			continue
 		}
-		if !c.Policy.DockerListDecision("container", name, container.ID, "containers") {
+		if !c.Policy.DockerListDecision("container", firstContainerName(*summary), container.ID, containersGranted, summary.Names...) {
 			filteredContainers++
 			continue
 		}
@@ -705,11 +754,11 @@ func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) con
 	filteredVolumes := 0
 	keptVolumes := make([]dockerobs.VolumeSummary, 0, len(usage.Volumes))
 	for _, volume := range usage.Volumes {
-		if !c.Policy.DockerListDecision("volume", "", volume.Name, "volumes") {
+		if !c.Policy.DockerListDecision("volume", "", volume.Name, volumesGranted) {
 			filteredVolumes++
 			continue
 		}
-		if volume.RefCount == nil {
+		if volume.RefCount == nil && !incomplete {
 			count := volumeRefs[volume.Name]
 			volume.RefCount = &count
 		}
@@ -726,16 +775,23 @@ func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) con
 	// The daemon-supplied reference counts take precedence; mount-based
 	// counts are only the correlation fallback.
 	reclaimable.UnusedImages = unusedImages
-	reclaimable.UnusedImageBytes = &unusedImageBytes
+	if stable {
+		reclaimable.UnusedImageBytes = &unusedImageBytes
+	}
 	reclaimable.UnusedVolumes = unusedVolumes
-	reclaimable.UnusedVolumeBytes = &unusedVolumeBytes
+	if stable {
+		reclaimable.UnusedVolumeBytes = &unusedVolumeBytes
+	}
 	reclaimable.DanglingImages = dangling
 	for _, item := range containers {
+		if !stable {
+			break
+		}
 		switch item.State {
 		case "exited", "created", "dead", "removing":
 			// Stopped-container evidence follows the container policy: a
 			// denied container contributes neither its ID nor its footprint.
-			if !c.Policy.DockerListDecision("container", firstContainerName(item), item.ID, "containers") {
+			if !c.Policy.DockerListDecision("container", firstContainerName(item), item.ID, containersGranted, item.Names...) {
 				filteredContainers++
 				continue
 			}
@@ -745,22 +801,16 @@ func (c *Collector) dockerDiskUsage(ctx context.Context, r *contract.Result) con
 	usage.Reclaimable = reclaimable
 	usageData := dockerobs.ToDiskUsage(usage)
 	r.Data = &usageData
-	if !stable {
+	if !stable && !incomplete {
 		r.Issue("non_atomic_observation", r.Source, "docker changed during accounting; reclaimable estimates are non-atomic")
+	}
+	if unknownContainers > 0 {
+		r.Issue("inventory_gap", r.Source, fmt.Sprintf("%d disk-usage containers omitted because their names could not be checked against policy", unknownContainers))
 	}
 	if filteredImages > 0 || filteredVolumes > 0 || filteredContainers > 0 {
 		r.Issue("policy_filtered", "docker", fmt.Sprintf("%d images, %d volumes and %d containers omitted by explicit denial", filteredImages, filteredVolumes, filteredContainers))
 	}
 	return *r
-}
-
-func containerByID(items []dockerobs.ContainerSummary, id string) (*dockerobs.ContainerSummary, bool) {
-	for i := range items {
-		if items[i].ID == id {
-			return &items[i], true
-		}
-	}
-	return nil, false
 }
 
 // dockerLogs retrieves one bounded, non-following log window for one
@@ -787,13 +837,8 @@ func (c *Collector) dockerLogs(ctx context.Context, r *contract.Result, a contra
 		r.Issue("invalid_window", "", e.Error())
 		return *r
 	}
-	id, summary, e := c.resolveContainerLive(ctx, a.Container)
-	if e != nil {
-		selectorFailure(r, a.Container, e)
-		return *r
-	}
-	if !c.Policy.DockerDecision("logs", a.Container, id) {
-		deniedResult(r, "logs", a.Container)
+	id, summary, ok := c.authorizedContainer(ctx, r, "logs", a.Container)
+	if !ok {
 		return *r
 	}
 	logBytes := l.InspectionBytes
@@ -833,9 +878,8 @@ func (c *Collector) dockerLogs(ctx context.Context, r *contract.Result, a contra
 		r.Issue("docker_unavailable", a.Container, "observer returned no log projection")
 		return *r
 	}
-	if e := c.recheckContainerIdentity(ctx, a.Container, id); e != nil {
-		r.Error = true
-		r.Issue("identity_changed", a.Container, e.Error())
+	if e := c.recheckContainerAuthorization(ctx, "logs", a.Container, id); e != nil {
+		recheckFailure(r, a.Container, e)
 		return *r
 	}
 	logs := response.Logs

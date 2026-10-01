@@ -14,28 +14,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func Trust(path string, uid int) error {
-	if !filepath.IsAbs(path) {
-		return errors.New("trust path must be absolute")
-	}
-	for p := path; ; p = filepath.Dir(p) {
-		var st unix.Stat_t
-		if e := unix.Lstat(p, &st); e != nil {
-			return e
-		}
-		if st.Mode&unix.S_IFMT == unix.S_IFLNK {
-			return fmt.Errorf("%s: symlinked policy source", p)
-		}
-		if (int(st.Uid) != uid && st.Uid != 0) || (st.Mode&0022 != 0 && !(st.Uid == 0 && st.Mode&unix.S_ISVTX != 0 && p != path)) {
-			return fmt.Errorf("%s: untrusted ownership or writable permissions", p)
-		}
-		if p == "/" {
-			break
-		}
-	}
-	return nil
-}
-
 const (
 	maxConfigurationInputBytes = 8 << 20
 	maxProfileDefinitions      = 1024
@@ -48,11 +26,8 @@ func Load(path string, system bool) (config.Config, *policy.Policy, error) {
 	if system {
 		uid = 0
 	}
-	if e := Trust(path, uid); e != nil {
-		return c, nil, e
-	}
 	remaining := maxConfigurationInputBytes
-	b, e := readConfiguration(path, &remaining)
+	b, e := config.ReadTrustedLinux(path, uid, &remaining)
 	if e != nil {
 		return c, nil, e
 	}
@@ -70,7 +45,7 @@ func Load(path string, system bool) (config.Config, *policy.Policy, error) {
 	}
 	defs := map[string]policy.Definition{}
 	for _, dir := range c.ProfileDirs {
-		if e = Trust(dir, uid); errors.Is(e, os.ErrNotExist) {
+		if e = config.TrustLinux(dir, uid); errors.Is(e, os.ErrNotExist) {
 			continue
 		} else if e != nil {
 			return c, nil, e
@@ -105,10 +80,7 @@ func Load(path string, system bool) (config.Config, *policy.Policy, error) {
 			if len(defs) >= maxProfileDefinitions {
 				return c, nil, errors.New("configuration exceeds 1024 profile definitions")
 			}
-			if e = Trust(file, uid); e != nil {
-				return c, nil, e
-			}
-			b, e = readConfiguration(file, &remaining)
+			b, e = config.ReadTrustedLinux(file, uid, &remaining)
 			if e != nil {
 				return c, nil, e
 			}
@@ -123,33 +95,6 @@ func Load(path string, system bool) (config.Config, *policy.Policy, error) {
 	return c, p, e
 }
 
-func readConfiguration(path string, remaining *int) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !st.Mode().IsRegular() {
-		return nil, errors.New("configuration source is not a regular file")
-	}
-	limit := min(1<<20, *remaining)
-	b, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(b) > limit {
-		if limit < 1<<20 {
-			return nil, errors.New("configuration input exceeds 8 MiB aggregate size limit")
-		}
-		return nil, errors.New("configuration document exceeds 1 MiB size limit")
-	}
-	*remaining -= len(b)
-	return b, nil
-}
 func OpenRegular(path string, p *policy.Policy) (*os.File, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, errors.New("absolute clean path required")

@@ -13,6 +13,21 @@ fi
 helpers=${HOSTLENS_HELPERS:?Run make test-matrix or just test-matrix to prepare disposable helpers}
 archives=${HOSTLENS_ARCHIVES:-${repo}/dist/archives}
 arch=$("${repo}/scripts/container-arch.sh")
+requested=${3:-native}
+case "${requested}" in
+  native) ;;
+  amd64 | arm64)
+    if [ "${requested}" != "${arch}" ]; then
+      printf 'Systemd acceptance requires native %s Docker; connected engine is %s. Run this case on a native %s runner.\n' \
+        "${requested}" "${arch}" "${requested}" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    printf 'Unsupported systemd architecture: %s\n' "${requested}" >&2
+    exit 2
+    ;;
+esac
 mode=${1:-restricted}
 case "${mode}" in
   standard | restricted)

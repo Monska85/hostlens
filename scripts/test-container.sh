@@ -5,8 +5,8 @@ set -eu
 repo=$(CDPATH='' cd -- "$(dirname -- "${0}")/.." && pwd)
 image=${HOSTLENS_TEST_IMAGE:-hostlens-checks:local}
 mode=${1:-test}
-case "${mode}" in test | coverage | archives) ;; *)
-  printf 'Usage: %s [test|coverage|archives]\n' "$0" >&2
+case "${mode}" in test | coverage | benchmark | archives) ;; *)
+  printf 'Usage: %s [test|coverage|benchmark|archives]\n' "$0" >&2
   exit 2
   ;;
 esac

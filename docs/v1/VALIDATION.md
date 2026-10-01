@@ -32,6 +32,10 @@ This isolates immutable-policy overhead with a fixture capability collector. It 
 
 The extended audit removed provenance allocation from policy access decisions. Focused 10,000-rule benchmarks measured zero allocations for unique and repeated patterns. They do not establish end-to-end request throughput.
 
+The current refactor adds `make benchmark` and `just benchmark`, which run matching request fixtures in the disposable checks container. On Linux amd64 with Go 1.27.0 and the same Ryzen 9 PRO 7940HS host, five 200 ms samples measured 5,000-container inventory at about 2.22 ms and 20,036 allocations before the change, versus about 0.72–0.83 ms and 36 allocations after it. The 5,000-image analysis moved from about 3.10 ms and 20,202 allocations to about 2.07–2.28 ms and 266 allocations. A 200-link process inspection workload moved from about 344 µs and 979 kB to about 219 µs and 6.4 kB. The MCP `tools/list` fixture remained around 220–275 µs and 415 kB. These are controlled microbenchmarks, not production throughput or tail latency. The fixture code is in the Go benchmark tests under `internal/`.
+
+The follow-up image inventory index change used the same 5,000-item container benchmark: the median moved from 2.32 ms, 2.92 MB, and 266 allocations to 1.97 ms, 2.70 MB, and 238 allocations across five 200 ms samples. Container inventory and process links stayed near their earlier timings; gateway request medians varied between runs, so no gateway speed claim is made. This measures allocation and correlation work in one disposable container, not end-to-end Docker daemon latency.
+
 ## Extended audit
 
 The extended review exercised service health beyond pagination, malformed service records, unsafe group adoption, stalled discovery and configuration preparation, MCP argument validation, IPC deadlines, and real HTTP cancellation. Regression tests reproduce the affected behavior; the [audit records](../../openspec/changes) retain findings and dispositions.
@@ -106,7 +110,7 @@ After the v0.1.0 release, verified dead code was deleted from the observation co
 
 The pass also fixed a real defect the new tests exposed: `limitedBuffer` embedded `bytes.Buffer`, whose promoted `ReadFrom` let `exec`'s `io.Copy` bypass the inspection limit entirely, so oversized command output was captured unbounded. The buffer is now a plain `io.Writer` and the ceiling is enforced and tested. The telemetry exposition buffer (`internal/telemetry`) had the same promoted-`ReadFrom` defect class; it is now the same plain bounded-writer shape, with a regression test proving `io.Copy` cannot bypass the telemetry ceiling.
 
-Current statement coverage is 85.9% of internal statements in the disposable checks container (fresh `make coverage` run; 85.8% at the dead-code pass, since raised by the bounded-writer and admission-gate regression tests). Functions intentionally below 50%, with reasons:
+Current statement coverage is 86.8% of internal statements in the disposable checks container (fresh `make coverage` run; 85.8% at the dead-code pass). Functions intentionally below 50%, with reasons:
 
 - `secretIsMasked` (35.7%, `internal/platform/linux/isolation_linux.go`) guards after the reference check (reference `SameFile` mismatch, non-empty file size, unclean path, success for file and directory masks): they need a real systemd inaccessible mount under `/run/systemd/inaccessible`; tests refuse to create one. Reachable guards (no matching mount, prefix match, missing `ro`, unstatable path, non-root uid, non-zero permissions) are covered.
 
@@ -124,3 +128,27 @@ The typed-contract change rewrote all 27 MCP tool result payloads from untyped m
 Fresh `make coverage` in the disposable checks container measured 86.4% internal statements, above the 86.1% pre-change baseline. New regression tests cover the typed failure paths (wrong-typed arguments, page-window bounds, systemd/package collector failures and denials, log selector/filter/window/encoding guards, non-UTF-8 raw tails and oversized inspection sources), the full `/proc` network-table collection into the typed payload, and gateway rejection of non-object argument JSON with `invalid_arguments` before backend contact. Argument-contract tables assert that rejected arguments never reach the backend and that accepted arguments cross the collector boundary exactly once.
 
 Container limits observed during validation: the checks container shares host kernel `6.18.52-1-lts`, runs with no network, a read-only root and source mount, a 4 GiB tmpfs at `/tmp`, `--pids-limit=512`, `--memory=4g`, `--cpus=2`, all capabilities dropped, and `no-new-privileges`; module and build caches are read-only mounts. These bounds bound test evidence: namespace-visible measurements in tests reflect the container, not a production host.
+
+## Runtime hardening and reduction cycle
+
+On 2026-10-02, the full runtime review closed four development and review rounds. It tightened backend activation acknowledgements, consolidated bounded JSON decoding, released the inherited observer descriptor, aligned observer configuration trust with backend limits, removed repeated gateway work, and made Docker selector, policy, reference, and error boundaries fail closed. The [review record](../../openspec/changes/archive/2026-10-02-full-runtime-hardening-and-reduction/review.md) records each concrete finding and its disposition.
+
+The final disposable-container race, vet, Linux and portable build suite passed. Instrumented internal statement coverage measured 86.8%. GoReleaser snapshot archives for amd64 and arm64 passed checksum, member, and shipped-link verification. The local matrix reported 12 named passes, including both systemd privilege modes and four application fixtures; the later review below found that its two arm64 systemd names had reused amd64 execution. The container-owned dependency scan found no known vulnerabilities at scan time. Structural request-path reductions have no claimed throughput number; sustained load and hosted CI remain unverified for this local revision.
+
+## Private live Docker acceptance
+
+The additional validation target starts a disposable, network-disabled Docker daemon with a private socket and temporary storage. It loads a pinned BusyBox image and exercises the observer and backend collector against live container, image, volume, network, disk, stats, and log observations. The fixture test creates and removes resources only in that nested engine; the read-only stage compares daemon state before and after collection. The live run exposed Docker's unsigned maximum PID limit, which the observer now treats as an unavailable finite limit while retaining the valid statistics. The target passed locally on 2026-10-02 after this fix.
+
+The outer Docker engine starts the privileged test daemon but does not supply its socket or workloads to the test. This validates the disposable environment and still shares the host kernel. The live target fails when its pinned images, nested daemon, or required kernel features are unavailable. Hosted CI execution of this new target remains unverified until the updated workflow runs on this revision.
+
+The matrix review found that locally named arm64 systemd cases had reused the connected amd64 engine. The runner now requires the declared native architecture and fails these cases on amd64 before container creation. The amd64 systemd cases and emulated arm64 platform case passed locally; native arm64 systemd behavior awaits the exact revision's hosted arm64 run.
+
+## Observer ownership and inventory review
+
+The observer reconciliation review found that an existing binary, unit, or IPC path could acquire a new ownership record before its origin was checked. Enabled reconciliation now rejects unrecorded paths before changing identities or services. It also checks filesystem types and recorded binary content, resumes matching interrupted writes, and preserves replaced resources during disablement. Diagnostic and administrative IPC paths must differ even without Docker.
+
+The 5,000-item container inventory benchmark measured five runs in the same disposable checks container. Median request time fell from 0.85 ms to 0.44 ms after evaluating the collection grant once per response. The image case fell from 2.03 ms to 1.75 ms. Allocations stayed at 36 and 238 per request, respectively. These are bounded local request benchmarks, not sustained throughput or production load results.
+
+The local race, vet, Linux and portable build suite passed after these changes; instrumented internal statement coverage measured 86.8%. Both snapshot archives passed checksum, member, and documentation-link verification.
+
+The eight distribution, emulated arm64, and application fixture cases passed, as did the two amd64 systemd privilege modes and private nested Docker acceptance. The container-owned Go vulnerability scan found no known vulnerabilities at scan time. Native arm64 systemd, hosted CI for this revision, and sustained production load remain unverified locally.

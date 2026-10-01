@@ -135,6 +135,22 @@ func TestMainShowsHelpAndVersion(t *testing.T) {
 	}
 }
 
+func TestAdministrativeResponseBound(t *testing.T) {
+	t.Parallel()
+	if _, err := readAdminResponse(strings.NewReader(strings.Repeat("x", maxAdminResponseBytes+1))); err == nil {
+		t.Fatal("oversized administration response accepted")
+	}
+	for _, body := range []string{`null`, `{} {}`, `{"generation":"one"} garbage`} {
+		if _, err := readAdminResponse(strings.NewReader(body)); err == nil {
+			t.Fatal("malformed administration response accepted")
+		}
+	}
+	data, err := readAdminResponse(strings.NewReader(`{"generation":"one"}`))
+	if err != nil || string(data) != `{"generation":"one"}` {
+		t.Fatal("bounded response changed", err)
+	}
+}
+
 func TestMainRefusesUnknownCommands(t *testing.T) {
 	path := userConfigPath(t)
 	if e := Main([]string{"mutate", "--config", path}); e == nil || !strings.Contains(e.Error(), "unknown command") {

@@ -209,7 +209,7 @@ Docker diagnostics SHALL require the diagnostics role and explicit active `docke
 
 #### Scenario: Denied container alias
 
-- **WHEN** a container matches an allowed list rule and a deny rule through its stable ID or current name
+- **WHEN** a container matches an allowed list rule and a deny rule through its stable ID or any current name, including a name other than the first, and a client requests it by ID
 - **THEN** the container, its logs, stats, and derived counts are excluded
 
 #### Scenario: Inventory without logs

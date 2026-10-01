@@ -4,41 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Monska85/hostlens/internal/dockerobs"
+	"github.com/Monska85/hostlens/internal/identity"
+	"github.com/Monska85/hostlens/internal/jsondoc"
 )
 
 // PeerUID returns the effective peer UID of one local Unix connection.
 func PeerUID(c net.Conn) (uint32, error) {
-	u, ok := c.(*net.UnixConn)
-	if !ok {
-		return 0, errors.New("Unix connection required")
-	}
-	raw, e := u.SyscallConn()
-	if e != nil {
-		return 0, e
-	}
-	var cred *syscall.Ucred
-	var inner error
-	e = raw.Control(func(fd uintptr) {
-		cred, inner = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
-	})
-	if e != nil {
-		return 0, e
-	}
-	if inner != nil {
-		return 0, inner
-	}
-	return cred.Uid, nil
+	return identity.PeerUID(c)
 }
 
 // checkedListener accepts only connections from the diagnostic backend
@@ -115,6 +95,7 @@ func ListenInherited(uid uint32) (net.Listener, error) {
 	if file == nil {
 		return nil, errors.New("socket-activated listener unavailable")
 	}
+	defer file.Close()
 	l, e := net.FileListener(file)
 	if e != nil {
 		return nil, e
@@ -170,16 +151,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func decodeRequest(r *http.Request, out *dockerobs.Request) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, dockerobs.MaxRequestBytes+1))
-	d.DisallowUnknownFields()
-	if e := d.Decode(out); e != nil {
-		return e
-	}
-	var extra any
-	if e := d.Decode(&extra); e == nil {
-		return errors.New("one observation request required")
-	}
-	return nil
+	return jsondoc.DecodeStrict(r.Body, dockerobs.MaxRequestBytes, out)
 }
 
 // run admits the observation through per-operation work bounds. Expensive
@@ -203,35 +175,11 @@ func resolveUID(name string) (uint32, error) {
 	if name == "" {
 		return uint32(os.Getuid()), nil
 	}
-	b, e := os.ReadFile("/etc/passwd")
-	if e != nil {
-		return 0, e
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Split(line, ":")
-		if len(fields) > 2 && fields[0] == name {
-			n, e := strconv.ParseUint(fields[2], 10, 32)
-			return uint32(n), e
-		}
-	}
-	return 0, errors.New("configured identity not found")
+	return identity.FileID("/etc/passwd", name)
 }
 
 // resolveGID maps the configured access group to its numeric GID.
 func resolveGID(name string) (int, error) {
-	b, e := os.ReadFile("/etc/group")
-	if e != nil {
-		return 0, e
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Split(line, ":")
-		if len(fields) > 2 && fields[0] == name {
-			n, e := strconv.Atoi(fields[2])
-			if e != nil || n < 0 {
-				return 0, errors.New("invalid group identifier")
-			}
-			return n, nil
-		}
-	}
-	return 0, fmt.Errorf("access group %q not found", name)
+	id, err := identity.FileID("/etc/group", name)
+	return int(id), err
 }

@@ -30,6 +30,15 @@ make verify-archives
 
 The Go test container has no network, a read-only root and source/module mounts, temporary writable storage, dropped capabilities, and bounded memory/processes. `HOSTLENS_TEST_IMAGE` overrides its image. `make test-image` builds its Linux Go toolchain, Python, race-test compiler, and vulnerability scanner from pinned inputs. No host Go installation or scanner executable is mounted. Matrix invocation compiles temporary acceptance helpers with the host Go toolchain and prepared module cache. Containers execute those helpers and the selected archives; they do not mount Go.
 
+Run the live Docker observer acceptance after preparing its digest-pinned images:
+
+```sh
+make prepare-live-docker
+make test-live-docker
+```
+
+This target starts a privileged nested Docker daemon with temporary storage and a private socket, loads a pinned BusyBox fixture, and runs the observer and collector tests in the checks container. It never mounts the administrator's Docker socket into the test container. The runner fails if an image, daemon, or required kernel feature is unavailable and removes its engine and temporary files on exit. It shares the host kernel, so this proves behavior in the disposable environment rather than host-wide production safety. CI runs the same target after the ordinary checks.
+
 Prepare the representative environments before full matrix acceptance:
 
 ```sh
@@ -46,7 +55,7 @@ make test-matrix TARGET=native
 make test-matrix
 ```
 
-The local full matrix requires arm64 emulation on an amd64 engine. Set `HOSTLENS_QEMU_AARCH64` to a static interpreter with `openat2` support. Ordinary system QEMU uses `HOSTLENS_QEMU_PRESERVE_ARGV0=0`. This tested alternative copies an interpreter without registering host binfmt handlers:
+The local arm64 platform case requires arm64 emulation on an amd64 engine. The arm64 systemd lifecycle cases require a native arm64 Docker engine and fail explicitly on amd64; hosted CI uses arm64 runners for those cases. Set `HOSTLENS_QEMU_AARCH64` to a static interpreter with `openat2` support for the platform case. Ordinary system QEMU uses `HOSTLENS_QEMU_PRESERVE_ARGV0=0`. This tested alternative copies an interpreter without registering host binfmt handlers:
 
 ```sh
 image=tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
@@ -62,7 +71,7 @@ export HOSTLENS_QEMU_PRESERVE_ARGV0=1
 
 `packaging/tests/matrix.json` defines the shared platform and lifecycle cases. `native` selects Debian for the connected Linux engine's architecture, not the client machine. Native arm64 uses arm64 images and freshly built helpers, with no QEMU. Explicit amd64 cases on an arm64 engine require working amd64 emulation; Arch's case remains amd64.
 
-An omitted target runs every case serially. Console output shows the archive directory, version, image, architecture, named stages, and outcome. Any failed case fails the command after the remaining cases finish. Cancellation stops the active case and its container. CI schedules cases concurrently and retains their ordinary job logs.
+An omitted target runs every case serially. On an amd64 engine, the two native arm64 systemd cases fail rather than reuse amd64 evidence; run them on an arm64 engine or inspect the exact revision's hosted CI results. Console output shows the archive directory, version, image, architecture, named stages, and outcome. Any failed case fails the command after the remaining cases finish. Cancellation stops the active case and its container. CI schedules cases concurrently and retains their ordinary job logs.
 
 Each case verifies and extracts its archive into fresh disposable storage. It checks archive safety, the complete compressed stream, member hashes, executable modes, required notices, and the expected version. Coreutils verifies the checksum list; a focused case checks only its selected archive. Expanded packaging directories are not test inputs.
 
@@ -126,7 +135,7 @@ New ordinary runs supersede older runs for the same workflow, event and branch/P
 - **Preparation adapter:** `tools/release/prepare.py` clears declared staging paths, collects dependency license notices, and generates the per-member upgrade manifest. It does not create archives or checksum files.
 - **Validation:** `tools/archive` shares the runtime upgrade reader and adds packaging assertions. Matrix and container helpers exercise HostLens behavior and privilege boundaries.
 
-Archives contain both executables, a minimal installation configuration, profiles, operator guidance, the tool contract snapshot, and license notices. The example inherits runtime defaults and specifies only its version, system mode, and standard privilege. Go module manifests and pre-rendered service units are omitted: these are executable distributions, and installation generates units from the selected configuration. Go embeds module build information in each executable; dependency license notices remain in the archive.
+Archives contain both executables, a minimal installation configuration, profiles, operator guidance, the tool contract snapshot, and license notices. The example inherits runtime defaults and specifies only its version, system mode, and standard privilege. Go module manifests and pre-rendered service units are omitted: these are executable distributions, and installation generates units from the selected configuration. Go embeds module build information in each executable; dependency license notices remain in the archive. Archive validation rejects undeclared `release.json` fields before accepting a candidate.
 
 Packaging uses fresh declared staging trees. After a failed rebuild, fix the failure and rerun `package` before testing that source. Plain `go build` does not need Python, Docker, or GoReleaser. Native OS packages and product container images are not required for the current systemd installation contract.
 

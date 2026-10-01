@@ -21,7 +21,7 @@ Diagnostic evidence is collection-worker-scoped. Collectors read live sources on
 | Docker observer | Isolated system-wide Engine observations over a typed GET-only contract           | Dedicated non-login identity with process-scoped socket-group authority     |
 | Local CLI       | Tokens, policy explanation, reload/status, installation and upgrades              | Local administrator or owning-user authority; never granted by an MCP token |
 
-Gateway and backend communicate through structured local IPC with peer-identity checks. The diagnostic backend alone reaches the Docker observer through a second typed IPC endpoint whose peer check rejects every other identity. Each call carries a generation; the backend rejects inconsistent generations. Source policies are immutable snapshots, and status reports their cached fingerprint and generation together.
+Gateway and backend communicate through structured local IPC with peer-identity checks. Diagnostic and administrative IPC paths must differ in every configuration. The diagnostic backend alone reaches the Docker observer through a second typed IPC endpoint whose peer check rejects every other identity. Each call carries a generation; the backend rejects inconsistent generations. Source policies are immutable snapshots, and status reports their cached fingerprint and generation together.
 
 Reload validates both components before activating new policy, assessment settings, and limits. Listener, TLS, credential-location, identity, privilege, and Docker observer topology changes require restart. In-flight calls may finish under their original generation. An unresolved restart mismatch fails closed.
 

@@ -70,7 +70,7 @@ func newRecordingEngine(t *testing.T) *recordingEngine {
 		case "/v1.51/containers/" + id64(1) + "/json":
 			fmt.Fprint(w, `{"Id":"`+id64(1)+`","Created":"2026-09-12T10:00:00Z","Name":"/web","Image":"sha256:`+id64(1)+`","Config":{"Image":"nginx:1","Healthcheck":{"Test":["CMD","curl","-f","http://localhost"]},"Env":["SECRET=leak"],"Cmd":["nginx"],"Labels":{"topsecret":"value"}},"State":{"Status":"running","OOMKilled":false,"Pid":42,"StartedAt":"2026-09-12T10:00:01Z","FinishedAt":"0001-01-01T00:00:00Z","Health":{"Status":"healthy","FailingStreak":0,"Log":[{"Start":"2026-09-12T10:00:00Z","End":"2026-09-12T10:00:01Z","ExitCode":0,"Output":"health command output"}]}},"RestartCount":2,"HostConfig":{"LogConfig":{"Type":"json-file","Config":{"max-size":"10m"}},"RestartPolicy":{"Name":"on-failure"},"NetworkMode":"bridge","PidsLimit":100,"NanoCpus":1000000000,"CpuShares":512,"Memory":536870912,"MemorySwap":-1},"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"8080"}]},"Networks":{"bridge":{"IPAddress":"172.17.0.2","MacAddress":"02:42:ac:11:00:02"}}},"Mounts":[]}`)
 		case "/v1.51/containers/" + id64(1) + "/stats":
-			fmt.Fprint(w, `{"read":"2026-09-12T10:00:02Z","preread":"2026-09-12T09:59:59Z","cpu_stats":{"cpu_usage":{"total_usage":2000000000},"system_cpu_usage":10000000000,"online_cpus":2},"precpu_stats":{"cpu_usage":{"total_usage":1000000000},"system_cpu_usage":9000000000},"memory_stats":{"usage":1000,"limit":2000,"stats":{"inactive_file":100}},"blkio_stats":{"io_service_bytes_recursive":[{"op":"Read","value":5},{"op":"Write","value":7}]},"networks":{"eth0":{"rx_bytes":10,"tx_bytes":20}},"pids_stats":{"current":3,"limit":100}}`)
+			fmt.Fprint(w, `{"read":"2026-09-12T10:00:02Z","preread":"2026-09-12T09:59:59Z","cpu_stats":{"cpu_usage":{"total_usage":2000000000},"system_cpu_usage":10000000000,"online_cpus":2},"precpu_stats":{"cpu_usage":{"total_usage":1000000000},"system_cpu_usage":9000000000},"memory_stats":{"usage":1000,"limit":2000,"stats":{"inactive_file":100}},"blkio_stats":{"io_service_bytes_recursive":[{"op":"Read","value":5},{"op":"Write","value":7}]},"networks":{"eth0":{"rx_bytes":10,"tx_bytes":20}},"pids_stats":{"current":3,"limit":18446744073709551615}}`)
 		case "/v1.51/containers/" + id64(1) + "/logs":
 			w.Header().Set("Content-Type", "application/vnd.docker.multiplexed-stream")
 			for _, frame := range []struct {
@@ -212,6 +212,9 @@ func TestObserverRegistryUsesOnlyReadAllowlist(t *testing.T) {
 	}
 	if stats.Stats.CPUPercent == nil {
 		t.Fatal("paired CPU sample must supply a rate")
+	}
+	if stats.Stats.PidsLimit != nil {
+		t.Fatal("unbounded daemon PID sentinel must be omitted")
 	}
 	logs := s.run(context.Background(), dockerobs.Request{Version: dockerobs.ProtocolVersion, Operation: dockerobs.OpContainerLogs, Selector: id64(1), Logs: dockerobs.LogOptions{Records: 10, MaxBytes: 4096}})
 	if logs.Failed || logs.Logs == nil {

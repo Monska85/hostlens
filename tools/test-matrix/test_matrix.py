@@ -59,12 +59,14 @@ class MatrixTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Timed out waiting for stalled", result.stderr)
 
-    def test_systemd_uses_selected_image(self):
-        case = dict(target="systemd", kind="systemd", mode="restricted", image="selected")
+    def test_systemd_uses_selected_image_and_arch(self):
+        case = dict(
+            target="systemd", kind="systemd", mode="restricted", image="selected", arch="arm64"
+        )
         with mock.patch.dict(os.environ, clear=True):
-            self.assertEqual(runner.command_for(case)[1:], ["restricted", "selected"])
+            self.assertEqual(runner.command_for(case)[1:], ["restricted", "selected", "arm64"])
         with mock.patch.dict(os.environ, HOSTLENS_SYSTEMD_IMAGE="override"):
-            self.assertEqual(runner.command_for(case)[1:], ["restricted", "override"])
+            self.assertEqual(runner.command_for(case)[1:], ["restricted", "override", "arm64"])
 
     def test_json_needs_no_external_tools(self):
         with (

@@ -183,7 +183,11 @@ func TestMetricsHTTPAuthorizationAndLifecycle(t *testing.T) {
 	candidate := c.Active
 	c.Load = func() (backend.Snapshot, error) { return candidate, nil }
 	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		body := `{"prepared":true}`
+		if r.URL.Path == "/activate" {
+			body = `{"active":true}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 	c.Active.Config.Server.TrustedProxies = nil
 	candidate.Config.Metrics.Enabled = true

@@ -5,14 +5,17 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Monska85/hostlens/internal/jsondoc"
 )
+
+const maxReleaseManifestBytes = 64 << 10
 
 type Release struct {
 	Version      string            `json:"version"`
@@ -22,6 +25,19 @@ type Release struct {
 }
 
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+
+func digestFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 
 // Extract validates an archive into a fresh private directory. Callers must discard
 // the directory on error and supply the architecture they intend to execute.
@@ -84,11 +100,12 @@ func Extract(archive, dest, architecture string) (Release, error) {
 		return release, errors.New("archive exceeds 256 MiB expanded limit")
 	}
 
-	b, e := os.ReadFile(filepath.Join(dest, "release.json"))
+	manifest, e := os.Open(filepath.Join(dest, "release.json"))
 	if e != nil {
 		return release, e
 	}
-	if e = json.Unmarshal(b, &release); e != nil {
+	defer manifest.Close()
+	if e = jsondoc.DecodeStrict(manifest, maxReleaseManifestBytes, &release); e != nil {
 		return release, e
 	}
 	if release.Schema != 1 || release.Architecture != architecture || release.Version == "" {
@@ -102,8 +119,8 @@ func Extract(archive, dest, architecture string) (Release, error) {
 		if !seen[name] {
 			return release, errors.New("missing manifest member")
 		}
-		b, e = os.ReadFile(filepath.Join(dest, name))
-		if e != nil || digest(b) != want {
+		got, e := digestFile(filepath.Join(dest, name))
+		if e != nil || got != want {
 			return release, errors.New("archive checksum mismatch")
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +56,11 @@ func (m Manager) Reconcile(ctx context.Context, apply bool) (Manifest, Reconcile
 	if e = config.ValidateLinux(m.Config); e != nil {
 		return man, ReconcileReport{}, fmt.Errorf("docker configuration invalid: %w", e)
 	}
+	if m.Config.Docker.Enabled {
+		if e = m.checkObserverResources(&man, apply); e != nil {
+			return man, ReconcileReport{}, e
+		}
+	}
 	report := ReconcileReport{
 		Desired: "disabled",
 		Current: "disabled",
@@ -93,14 +99,13 @@ func (m *Manager) planChanges(man *Manifest) []Resource {
 	changes := []Resource{}
 	desiredEnabled := m.Config.Docker.Enabled
 	for _, r := range man.Resources {
-		isObserver := strings.Contains(r.Path, "hostlens-docker-observer") ||
-			(r.Kind == "state" && strings.HasSuffix(r.Path, "docker-observer.sock"))
+		isObserver := strings.Contains(r.Path, "hostlens-docker-observer") || isObserverSocketResource(r)
 		if !isObserver && r.Path != observerGroup && r.Path != observerUser && r.Path != m.Config.Docker.ObserverSocket {
 			continue
 		}
 		if desiredEnabled {
 			switch {
-			case r.Kind == "state" && strings.HasSuffix(r.Path, "docker-observer.sock") && r.Path != m.Config.Docker.ObserverSocket:
+			case isObserverSocketResource(r) && r.Path != m.Config.Docker.ObserverSocket:
 				// A superseded socket record is a removal, never a create.
 				if r.State != "removed" {
 					changes = append(changes, Resource{Path: r.Path, Kind: r.Kind, State: "remove"})
@@ -119,8 +124,8 @@ func (m *Manager) planChanges(man *Manifest) []Resource {
 					changes = append(changes, Resource{Path: r.Path, Kind: r.Kind, State: "recreate"})
 				}
 			case r.Kind == "file" && r.Hash != "":
-				b, e := os.ReadFile(m.path(r.Path))
-				if e == nil && digest(b) == r.Hash {
+				got, e := digestFile(m.path(r.Path))
+				if e == nil && got == r.Hash {
 					continue
 				}
 				// Content drift is a pending repair: units rewrite from the
@@ -201,6 +206,100 @@ func findResource(man *Manifest, path, kind string) *Resource {
 	return nil
 }
 
+// Installation-reserved state is mutable; observer socket records are not.
+// This also recognizes observer sockets moved to custom path names.
+func isObserverSocketResource(r Resource) bool { return r.Kind == "state" && !r.Mutable }
+
+// checkObserverPath refuses a resource that the manifest cannot prove is
+// HostLens-owned. Missing paths may be created; existing files must have an
+// owned record and their expected filesystem type. An interrupted write may
+// resume only when the file still matches recorded or generated content.
+func (m *Manager) checkObserverPath(man *Manifest, path, kind string) (bool, error) {
+	st, err := os.Lstat(m.path(path))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	r := findResource(man, path, kind)
+	if r == nil || !r.Owned || r.State != "complete" && r.State != "intent" {
+		return true, fmt.Errorf("observer resource lacks ownership: %s", path)
+	}
+	if kind == "file" && !st.Mode().IsRegular() || kind == "state" && st.Mode()&os.ModeSocket == 0 {
+		return true, fmt.Errorf("unexpected observer resource type: %s", path)
+	}
+	if kind == "file" {
+		if r.Hash == "" {
+			if r.State != "intent" {
+				return true, fmt.Errorf("observer file lacks recorded checksum: %s", path)
+			}
+		}
+		if path == observerBinary || r.State == "intent" {
+			got, err := digestFile(m.path(path))
+			if err != nil {
+				return true, err
+			}
+			allowed := got == r.Hash && r.Hash != ""
+			if r.State == "intent" {
+				switch path {
+				case "/etc/systemd/system/" + observerSvc:
+					allowed = allowed || got == digest([]byte(ObserverUnit(m.Config)))
+				case "/etc/systemd/system/" + observerSock:
+					allowed = allowed || got == digest([]byte(ObserverSocketUnit(m.Config)))
+				}
+			}
+			if !allowed {
+				return true, fmt.Errorf("modified observer file preserved: %s", path)
+			}
+		}
+	}
+	return true, nil
+}
+
+func (m *Manager) checkObserverResources(man *Manifest, apply bool) error {
+	resources := []struct{ path, kind string }{
+		{observerBinary, "file"},
+		{"/etc/systemd/system/" + observerSvc, "file"},
+		{"/etc/systemd/system/" + observerSock, "file"},
+		{m.Config.Docker.ObserverSocket, "state"},
+	}
+	binaryPresent := false
+	for _, resource := range resources {
+		present, err := m.checkObserverPath(man, resource.path, resource.kind)
+		if err != nil {
+			return err
+		}
+		if resource.path == observerBinary {
+			binaryPresent = present
+		}
+	}
+	for _, r := range man.Resources {
+		if isObserverSocketResource(r) && r.Path != m.Config.Docker.ObserverSocket && r.Owned && r.State != "removed" {
+			if _, err := m.checkObserverPath(man, r.Path, "state"); err != nil {
+				return err
+			}
+		}
+	}
+	if !apply || binaryPresent {
+		return nil
+	}
+	if m.Source == "" {
+		return fmt.Errorf("observer binary missing: %s (supply --source with the extracted release)", observerBinary)
+	}
+	st, err := os.Lstat(filepath.Join(m.Source, "hostlens-docker-observer"))
+	if err != nil {
+		return fmt.Errorf("regular source observer binary required: %w", err)
+	}
+	if !st.Mode().IsRegular() {
+		return errors.New("regular source observer binary required")
+	}
+	if st.Size() <= 0 || st.Size() > 64<<20 {
+		return errors.New("source observer binary must be between 1 byte and 64 MiB")
+	}
+	return nil
+}
+
 // upsertResource locates the recorded observer resource entry or appends one
 // with fresh ownership intent.
 func upsertResource(man *Manifest, path, kind string) *Resource {
@@ -270,39 +369,52 @@ func (m *Manager) reconcileIdentity(ctx context.Context, man *Manifest) error {
 }
 
 // reconcileBinary records or replaces the observer binary. Fresh installs
-// and upgrades provision it; reconciliation adopts the installed binary, or
+// and upgrades provision it; reconciliation verifies the installed binary, or
 // copies it from a supplied release source when upgrading from a release
 // that predates the observer. A content-drifted binary is never silently
 // adopted: the operator must restore it explicitly.
 func (m *Manager) reconcileBinary(ctx context.Context, man *Manifest) error {
-	r := upsertResource(man, observerBinary, "file")
-	if b, e := os.ReadFile(m.path(observerBinary)); e == nil {
-		if r.Hash != "" && digest(b) != r.Hash {
-			return fmt.Errorf("modified observer binary preserved: %s; restore the verified release with reconcile --source before applying", observerBinary)
-		}
-		if r.Hash == "" {
-			r.Hash = digest(b)
-			r.Owned = true
+	present, err := m.checkObserverPath(man, observerBinary, "file")
+	if err != nil {
+		return err
+	}
+	if present {
+		r := findResource(man, observerBinary, "file")
+		if r.State == "intent" {
 			r.State = "complete"
 			return m.save(man)
 		}
-		r.State = "complete"
-		return m.save(man)
+		return nil
 	}
 	if m.Source == "" {
 		return fmt.Errorf("observer binary missing: %s (supply --source with the extracted release after upgrading from a release without the observer)", observerBinary)
 	}
-	b, e := os.ReadFile(filepath.Join(m.Source, "hostlens-docker-observer"))
+	source := filepath.Join(m.Source, "hostlens-docker-observer")
+	f, e := os.Open(source)
 	if e != nil {
 		return fmt.Errorf("source observer binary missing: %w", e)
 	}
+	st, e := f.Stat()
+	if e != nil || !st.Mode().IsRegular() || st.Size() <= 0 || st.Size() > 64<<20 {
+		f.Close()
+		return errors.New("regular source observer binary between 1 byte and 64 MiB required")
+	}
+	b, e := io.ReadAll(io.LimitReader(f, (64<<20)+1))
+	ce := f.Close()
+	if e == nil {
+		e = ce
+	}
+	if e != nil || len(b) == 0 || len(b) > 64<<20 {
+		return errors.New("bounded source observer binary read failed")
+	}
+	r := upsertResource(man, observerBinary, "file")
 	r.Owned = true
 	r.State = "intent"
 	r.Hash = digest(b)
 	if e = m.save(man); e != nil {
 		return e
 	}
-	if e = token.Atomic(m.path(observerBinary), b, 0755); e != nil {
+	if e = token.AtomicNew(m.path(observerBinary), b, 0755); e != nil {
 		return fmt.Errorf("partial reconciliation (%s): %w", observerBinary, e)
 	}
 	r.State = "complete"
@@ -327,6 +439,10 @@ func (m *Manager) reconcileEnabled(ctx context.Context, man *Manifest) error {
 	}
 	socketChanged := false
 	for _, unit := range []string{"/etc/systemd/system/" + observerSock, "/etc/systemd/system/" + observerSvc} {
+		present, e := m.checkObserverPath(man, unit, "file")
+		if e != nil {
+			return e
+		}
 		r := upsertResource(man, unit, "file")
 		body := units[unit]
 		if r.State != "complete" || m.pathContentChanged(r, body) {
@@ -335,7 +451,11 @@ func (m *Manager) reconcileEnabled(ctx context.Context, man *Manifest) error {
 			if e := m.save(man); e != nil {
 				return e
 			}
-			if e := token.Atomic(m.path(unit), body, 0644); e != nil {
+			write := token.Atomic
+			if !present {
+				write = token.AtomicNew
+			}
+			if e := write(m.path(unit), body, 0644); e != nil {
 				return fmt.Errorf("partial reconciliation (%s): %w", unit, e)
 			}
 			r.Hash = digest(body)
@@ -352,7 +472,7 @@ func (m *Manager) reconcileEnabled(ctx context.Context, man *Manifest) error {
 	// survive an enabled reconciliation.
 	for i := range man.Resources {
 		r := &man.Resources[i]
-		if r.Kind == "state" && strings.HasSuffix(r.Path, "docker-observer.sock") && r.Path != m.Config.Docker.ObserverSocket && r.Owned && r.State != "removed" {
+		if isObserverSocketResource(*r) && r.Path != m.Config.Docker.ObserverSocket && r.Owned && r.State != "removed" {
 			if e := os.Remove(m.path(r.Path)); e != nil && !errors.Is(e, os.ErrNotExist) {
 				return fmt.Errorf("superseded observer socket removal failed (%s): %w", r.Path, e)
 			}
@@ -361,6 +481,9 @@ func (m *Manager) reconcileEnabled(ctx context.Context, man *Manifest) error {
 	}
 	// The live-path socket record is re-adopted regardless of a prior
 	// removal so disable-and-re-enable cycles report honestly afterwards.
+	if _, e := m.checkObserverPath(man, m.Config.Docker.ObserverSocket, "state"); e != nil {
+		return e
+	}
 	socketRecord := upsertResource(man, m.Config.Docker.ObserverSocket, "state")
 	if socketRecord.State == "" || socketRecord.State == "removed" {
 		socketRecord.State = "complete"
@@ -398,19 +521,42 @@ func (m *Manager) reconcileDisabled(ctx context.Context, man *Manifest) error {
 			if _, e = m.command(ctx, "systemctl", "disable", "--now", unit); e != nil {
 				return fmt.Errorf("observer disablement failed: %w", e)
 			}
+			st, e := os.Lstat(m.path(r.Path))
+			if e != nil || !st.Mode().IsRegular() || r.Hash == "" {
+				r.State = "preserved"
+				continue
+			}
+			got, e := digestFile(m.path(r.Path))
+			if e != nil || got != r.Hash {
+				r.State = "preserved"
+				continue
+			}
 			if e = os.Remove(m.path(r.Path)); e != nil && !errors.Is(e, os.ErrNotExist) {
 				return fmt.Errorf("observer unit removal failed (%s): %w", unit, e)
 			}
+			r.State = "removed"
+			changed++
+		} else if !errors.Is(e, os.ErrNotExist) {
+			return e
+		} else {
+			r.State = "removed"
+			changed++
 		}
-		r.State = "removed"
-		changed++
 	}
 	// Any HostLens-owned observer socket record is removed, including paths
 	// superseded by a configuration change.
 	for i := range man.Resources {
 		r := &man.Resources[i]
-		if r.Kind == "state" && strings.HasSuffix(r.Path, "docker-observer.sock") && r.Owned && r.State != "removed" {
-			if _, e := os.Lstat(m.path(r.Path)); !errors.Is(e, os.ErrNotExist) {
+		if isObserverSocketResource(*r) && r.Owned && r.State != "removed" {
+			st, e := os.Lstat(m.path(r.Path))
+			if e == nil && st.Mode()&os.ModeSocket == 0 {
+				r.State = "preserved"
+				continue
+			}
+			if e != nil && !errors.Is(e, os.ErrNotExist) {
+				return e
+			}
+			if e == nil {
 				if e = os.Remove(m.path(r.Path)); e != nil && !errors.Is(e, os.ErrNotExist) {
 					return fmt.Errorf("observer resource removal failed (%s): %w", r.Path, e)
 				}
@@ -426,14 +572,19 @@ func (m *Manager) reconcileDisabled(ctx context.Context, man *Manifest) error {
 		if r == nil || !r.Owned || r.State == "removed" {
 			continue
 		}
-		if _, e := os.Lstat(m.path(spec.path)); errors.Is(e, os.ErrNotExist) {
+		st, e := os.Lstat(m.path(spec.path))
+		if errors.Is(e, os.ErrNotExist) {
 			r.State = "removed"
 			changed++
 			continue
 		}
+		if e != nil || spec.kind == "state" && st.Mode()&os.ModeSocket == 0 || spec.kind == "file" && !st.Mode().IsRegular() {
+			r.State = "preserved"
+			continue
+		}
 		if spec.kind == "file" {
-			b, e := os.ReadFile(m.path(spec.path))
-			if e != nil || r.Hash == "" || digest(b) != r.Hash {
+			got, e := digestFile(m.path(spec.path))
+			if e != nil || r.Hash == "" || got != r.Hash {
 				// Uncertain ownership blocks removal and stays for review.
 				r.State = "preserved"
 				continue
@@ -469,9 +620,9 @@ func (m *Manager) pathContentChanged(r *Resource, body []byte) bool {
 	if r.Hash == "" {
 		return true
 	}
-	b, e := os.ReadFile(m.path(r.Path))
+	got, e := digestFile(m.path(r.Path))
 	if e != nil {
 		return true
 	}
-	return digest(b) != digest(body)
+	return got != digest(body)
 }

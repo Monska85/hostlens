@@ -88,6 +88,29 @@ func setup(t *testing.T) (Manager, string, *systemFixture) {
 	sys := &systemFixture{users: map[string]int{}, groups: map[string]int{}}
 	return Manager{Root: root, Run: sys.run, Config: config.DefaultsLinux(true)}, source, sys
 }
+
+func TestLifecycleRejectsTrailingAndOversizedManifestBeforeMutation(t *testing.T) {
+	m, _, sys := setup(t)
+	path := m.path(ManifestPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		"trailing":      `{"version":1} {}`,
+		"oversized":     `{"version":1}` + strings.Repeat(" ", maxManifestBytes),
+		"unknown field": `{"version":1,"unexpected":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Uninstall(context.Background()); err == nil || len(sys.calls) != 0 {
+				t.Fatalf("unsafe manifest reached mutation: error=%v calls=%v", err, sys.calls)
+			}
+		})
+	}
+}
+
 func TestInstallStoppedManifestAndUninstallPreservation(t *testing.T) {
 	m, source, sys := setup(t)
 	if e := m.Install(context.Background(), source, false); e != nil {
@@ -187,6 +210,14 @@ func TestUpgradePreservesPolicyAndTracksPrevious(t *testing.T) {
 	if e := m.Install(context.Background(), source, false); e != nil {
 		t.Fatal(e)
 	}
+	// A literal bracket in the installation path must not turn profile
+	// discovery into a glob pattern during upgrade.
+	renamedRoot := m.Root + "[literal"
+	if err := os.Rename(m.Root, renamedRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(renamedRoot) })
+	m.Root = renamedRoot
 	legacyProfile := m.path("/etc/hostlens/profiles/web-common.yaml")
 	if _, err := os.Stat(legacyProfile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("fresh install created obsolete profile: %v", err)
@@ -218,6 +249,18 @@ func TestUpgradePreservesPolicyAndTracksPrevious(t *testing.T) {
 	if man.State != "installed" || man.Release != "candidate" {
 		t.Fatal(man)
 	}
+	foundCandidate := false
+	for _, resource := range man.Resources {
+		if strings.HasSuffix(resource.Path, "/nginx.yaml.candidate") {
+			foundCandidate = true
+			if b, err := os.ReadFile(m.path(resource.Path)); err != nil || !strings.Contains(string(b), "/**") {
+				t.Fatalf("profile review candidate missing: %v", err)
+			}
+		}
+	}
+	if !foundCandidate {
+		t.Fatal("profile review candidate was not recorded")
+	}
 	if e := m.Uninstall(context.Background()); e != nil {
 		t.Fatal(e)
 	}
@@ -237,6 +280,13 @@ func TestContainmentUnits(t *testing.T) {
 	}
 	if strings.Contains(GatewayUnit(), "CAP_DAC_READ_SEARCH") {
 		t.Fatal("gateway privilege")
+	}
+	for _, unit := range []string{GatewayUnit(), ObserverUnit(c), DiagnosticsUnit(c)} {
+		for _, directive := range []string{"NoNewPrivileges=yes", "ProtectSystem=strict", "PrivateIPC=yes", "SystemCallFilter=@system-service openat2"} {
+			if strings.Count(unit, directive) != 1 {
+				t.Fatalf("shared sandbox directive must appear once: %s", directive)
+			}
+		}
 	}
 }
 

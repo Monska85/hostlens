@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Monska85/hostlens/internal/dockerobs"
 )
 
 func TestListenIPCRefusesNonSocketResources(t *testing.T) {
@@ -31,6 +33,18 @@ func TestListenIPCRefusesNonSocketResources(t *testing.T) {
 	}
 	if _, e := ListenIPC(filepath.Join(dir, "missing-dir", "o.sock"), 0); e == nil {
 		t.Fatal("missing parent accepted")
+	}
+}
+
+func TestDecodeRequestRejectsTrailingAndOversizedBodies(t *testing.T) {
+	t.Parallel()
+	valid := `{"version":1,"operation":"container_list"}`
+	for _, body := range []string{valid + ` {}`, valid + ` garbage`, valid + strings.Repeat(" ", dockerobs.MaxRequestBytes)} {
+		r := httptest.NewRequest(http.MethodPost, "/observe", strings.NewReader(body))
+		var request dockerobs.Request
+		if err := decodeRequest(r, &request); err == nil {
+			t.Fatal("accepted malformed or oversized observation request")
+		}
 	}
 }
 

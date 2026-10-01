@@ -3,12 +3,12 @@ package linux
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,29 +20,23 @@ import (
 	"github.com/Monska85/hostlens/internal/token"
 )
 
-// Live engine acceptance. The suite exercises the complete Docker tool
-// surface against a real system-wide engine without performing any Docker
-// mutation. Run with:
-//
-//	HOSTLENS_LIVE_DOCKER_SOCKET=/var/run/docker.sock go test -run TestLiveDockerEngine ./internal/platform/linux/
-//
-// It reads daemon state before and after every stage through the Docker CLI
-// in read-only form and refuses to continue on any state change.
+// Live engine acceptance runs only through the private nested Docker runner.
 func liveSocket(t *testing.T) (string, int) {
 	t.Helper()
 	socket := os.Getenv("HOSTLENS_LIVE_DOCKER_SOCKET")
 	if socket == "" {
-		t.Skip("HOSTLENS_LIVE_DOCKER_SOCKET not set")
+		if os.Getenv("HOSTLENS_LIVE_DOCKER_FIXTURES") == "1" {
+			t.Fatal("fixture acceptance requires the private nested daemon socket")
+		}
+		t.Skip("live Docker acceptance requires the isolated runner")
 	}
-	group := os.Getenv("HOSTLENS_LIVE_DOCKER_GROUP")
-	if group == "" {
-		group = "docker"
+	if socket != "/dind/docker.sock" {
+		t.Fatal("live Docker acceptance requires the private nested daemon socket")
 	}
-	gid, e := dockerobsGID(group)
-	if e != nil {
-		t.Skipf("access group unavailable: %v", e)
+	if _, err := os.Stat("/run/hostlens-isolated-docker-test"); err != nil {
+		t.Fatalf("isolated-runner marker unavailable: %v", err)
 	}
-	return socket, gid
+	return socket, 0
 }
 
 func dockerSnapshot(t *testing.T) string {
@@ -59,7 +53,7 @@ func dockerSnapshot(t *testing.T) string {
 		cmd := exec.Command("docker", args...)
 		outBytes, e := cmd.Output()
 		if e != nil {
-			t.Skipf("docker CLI unavailable for state snapshots: %v", e)
+			t.Fatalf("docker CLI unavailable for state snapshots: %v", e)
 		}
 		out.Write(outBytes)
 		out.WriteByte('\n')
@@ -67,50 +61,11 @@ func dockerSnapshot(t *testing.T) string {
 	return out.String()
 }
 
-// assertUnchanged verifies the engine state snapshot did not change. On a
-// shared host, concurrent external workloads also mutate state; the check
-// then fails only when any change touches HostLens acceptance fixtures,
-// because HostLens-observed-only requests cannot be distinguished from
-// external mutations by snapshots alone.
 func assertUnchanged(t *testing.T, before, after string) {
 	t.Helper()
-	if before == after {
-		return
+	if before != after {
+		t.Fatalf("isolated Docker engine changed during observation\nbefore:\n%s\nafter:\n%s", before, after)
 	}
-	beforeLines := map[string]bool{}
-	for _, line := range strings.Split(before, "\n") {
-		beforeLines[line] = true
-	}
-	external := true
-	for _, line := range strings.Split(after, "\n") {
-		if beforeLines[line] {
-			continue
-		}
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, "hostlens-acceptance") {
-			external = false
-		}
-		t.Logf("state change: %s", line)
-	}
-	before2 := map[string]bool{}
-	for _, line := range strings.Split(after, "\n") {
-		before2[line] = true
-	}
-	for _, line := range strings.Split(before, "\n") {
-		if before2[line] || line == "" {
-			continue
-		}
-		if strings.Contains(line, "hostlens-acceptance") {
-			external = false
-		}
-		t.Logf("state removal: %s", line)
-	}
-	if !external {
-		t.Fatalf("HostLens acceptance fixture state changed unexpectedly")
-	}
-	t.Log("external engine churn detected; HostLens-observation-only requests cannot cause it, snapshots alone cannot prove it on shared hosts")
 }
 
 // liveStack wires the backend collector to an in-process observer over a
@@ -225,18 +180,12 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 	networkName := "hostlens-acceptance-" + token.Random(8)
 	before := dockerSnapshot(t)
 	t.Cleanup(func() { assertUnchanged(t, before, dockerSnapshot(t)) })
-	// Disposable fixture lifecycle with unique names: create, observe,
-	// reference, unreferenced, and remove. Mutation runs only on explicitly
-	// authorized test hosts and only against HostLens-created fixtures.
-	pulledImage := !strings.Contains(before, "busybox:latest")
+	// Disposable fixture lifecycle occurs only in the private nested engine.
 	runDocker(t, "volume", "create", "--label", "hostlens-acceptance-unique="+name, volumeName)
 	t.Cleanup(func() { _ = exec.Command("docker", "volume", "rm", volumeName).Run() })
-	if pulledImage {
-		t.Cleanup(func() { _ = exec.Command("docker", "rmi", "busybox:latest").Run() })
-	}
 	runDocker(t, "network", "create", "--label", "hostlens-acceptance-unique="+name, networkName)
 	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", networkName).Run() })
-	runDocker(t, "run", "-d", "--name", name, "--label", "hostlens-acceptance-unique="+name, "--mount", "source="+volumeName+",target=/data", "--network", networkName, "busybox", "sleep", "300")
+	runDocker(t, "run", "-d", "--pull=never", "--name", name, "--label", "hostlens-acceptance-unique="+name, "--mount", "source="+volumeName+",target=/data", "--network", networkName, "busybox:1.37.0-musl", "sleep", "300")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() })
 
 	observed := collectTool(t, c, "list_docker_containers", contract.PageArgs{})
@@ -245,7 +194,7 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 	}
 	var fixtureID string
 	for _, item := range dockerPageOf[dockerobs.ContainerPayload](observed).Items {
-		if item.Image == "busybox" && item.State == "running" {
+		if slices.Contains(item.Names, name) && item.State == "running" {
 			fixtureID = item.ID
 		}
 	}
@@ -261,7 +210,6 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 	// classified unused.
 	assertNotUnused(t, c, volumeName, "list_docker_volumes")
 	assertNotUnused(t, c, networkName, "list_docker_networks")
-	_ = fixtureID
 
 	// Stop the fixture: the stopped container still holds the reference.
 	runDocker(t, "stop", name)
@@ -271,7 +219,6 @@ func TestLiveDockerEngineLifecycleWithFixtures(t *testing.T) {
 	// Remove the fixture container: the volume becomes unused at the next
 	// live observation without claiming an unused duration.
 	runDocker(t, "rm", "-f", name)
-	t.Cleanup(func() {})
 	afterRemove := collectTool(t, c, "list_docker_volumes", contract.PageArgs{})
 	if afterRemove.Error {
 		t.Fatal(afterRemove.Issues)
@@ -299,13 +246,27 @@ func assertNotUnused(t *testing.T, c *Collector, name, tool string) {
 	if result.Error {
 		t.Fatal(result.Issues)
 	}
-	for _, item := range dockerPageOf[dockerobs.VolumePayload](result).Items {
-		if item.Name == name {
-			if item.CurrentlyUnused {
-				t.Fatalf("%s %s referenced by a stopped container must not be unused", tool, name)
+	switch tool {
+	case "list_docker_volumes":
+		for _, item := range dockerPageOf[dockerobs.VolumePayload](result).Items {
+			if item.Name == name {
+				if item.CurrentlyUnused || item.ContainerRef == nil || *item.ContainerRef == 0 {
+					t.Fatalf("referenced volume %s classified unused: %+v", name, item)
+				}
+				return
 			}
-			return
 		}
+	case "list_docker_networks":
+		for _, item := range dockerPageOf[dockerobs.NetworkPayload](result).Items {
+			if item.Name == name {
+				if item.ContainerRef == nil || *item.ContainerRef == 0 {
+					t.Fatalf("referenced network %s has no references: %+v", name, item)
+				}
+				return
+			}
+		}
+	default:
+		t.Fatalf("unexpected reference tool: %s", tool)
 	}
 	t.Fatalf("%s %s missing from live inventory", tool, name)
 }
@@ -325,21 +286,4 @@ func runDocker(t *testing.T, args ...string) {
 	if e := cmd.Run(); e != nil {
 		t.Fatalf("docker %v: %v: %s", args, e, stderr.String())
 	}
-}
-
-func dockerobsGID(group string) (int, error) {
-	b, e := os.ReadFile("/etc/group")
-	if e != nil {
-		return 0, e
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Split(line, ":")
-		if len(fields) > 2 && fields[0] == group {
-			var gid int
-			if _, e := fmt.Sscanf(fields[2], "%d", &gid); e == nil {
-				return gid, nil
-			}
-		}
-	}
-	return 0, fmt.Errorf("group %q not found", group)
 }

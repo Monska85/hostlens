@@ -253,9 +253,10 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 	if ctx.Err() != nil {
 		return false
 	}
+	linkBuffer := make([]byte, 4097)
 	dir, e := c.auditDirectory(base)
 	if e == nil {
-		target, e := c.auditLink(dir, "exe", base+"/exe", true)
+		target, e := c.auditLink(dir, "exe", base+"/exe", true, linkBuffer)
 		if e == nil {
 			first.Executable = target
 		} else {
@@ -291,7 +292,7 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 					processObservationIssue(r, base+"/fd", errAuditLimit)
 					break
 				}
-				target, e := c.auditLink(fds, entry.Name(), base+"/fd/"+entry.Name(), false)
+				target, e := c.auditLink(fds, entry.Name(), base+"/fd/"+entry.Name(), false, linkBuffer)
 				if e != nil {
 					failures[processErrorCode(e)]++
 					continue
@@ -337,7 +338,7 @@ func (c *Collector) auditProcess(ctx context.Context, r *contract.Result, a cont
 // default-allowed unless denied by policy; only the path string is exposed,
 // never link contents. Descriptor observations expose only socket inode
 // numbers to callers.
-func (c *Collector) auditLink(dir *os.File, name, path string, executable bool) (string, error) {
+func (c *Collector) auditLink(dir *os.File, name, path string, executable bool, scratch []byte) (string, error) {
 	if !c.Policy.Allowed("files", path, true) || !c.Policy.Allowed("files", filepath.Join(dir.Name(), name), true) {
 		return "", errors.New("source denied")
 	}
@@ -348,7 +349,7 @@ func (c *Collector) auditLink(dir *os.File, name, path string, executable bool) 
 	if c.auditRemaining != nil {
 		size = min(size, *c.auditRemaining+1)
 	}
-	b := make([]byte, size)
+	b := scratch[:size]
 	n, err := unix.Readlinkat(int(dir.Fd()), name, b)
 	if c.auditRemaining != nil && n > 0 {
 		*c.auditRemaining = max(0, *c.auditRemaining-n)

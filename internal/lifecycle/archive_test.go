@@ -141,6 +141,22 @@ func TestExtractRefusesBadManifests(t *testing.T) {
 			t.Fatalf("bad manifest %s accepted", tc.name)
 		}
 	}
+	for name, suffix := range map[string]string{
+		"trailing document": " {}",
+		"oversized":         strings.Repeat(" ", maxReleaseManifestBytes),
+		"unknown field":     `,"unexpected":true`,
+	} {
+		members := validMembers()
+		if name == "unknown field" {
+			body := members[len(members)-1].body
+			members[len(members)-1].body = strings.TrimSuffix(body, "}") + suffix + "}"
+		} else {
+			members[len(members)-1].body += suffix
+		}
+		if _, e := Extract(buildArchive(t, members), t.TempDir(), "amd64"); e == nil {
+			t.Fatalf("%s release manifest accepted", name)
+		}
+	}
 	// A checksum that does not match the stored bytes must refuse.
 	members := validMembers()
 	members[0].body = "tampered"

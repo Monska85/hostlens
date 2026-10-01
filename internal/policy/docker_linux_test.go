@@ -72,6 +72,24 @@ func TestDockerDecisionRequiresGrant(t *testing.T) {
 	}
 }
 
+func TestDockerListCollectionGrantKeepsDenialPrecedence(t *testing.T) {
+	id := id64(5)
+	p := dockerPolicy(t, []string{"containers", "container/allowed"}, []string{"container/blocked"})
+	if !p.DockerListDecision("container", "allowed", id, p.Allowed("docker", "containers", false), "allowed") {
+		t.Fatal("collection grant must include an allowed item")
+	}
+	if p.DockerListDecision("container", "allowed", id, p.Allowed("docker", "containers", false), "blocked") {
+		t.Fatal("denied alias must override collection and item grants")
+	}
+	p = dockerPolicy(t, []string{"container/allowed"}, nil)
+	if !p.DockerListDecision("container", "allowed", id, p.Allowed("docker", "containers", false)) {
+		t.Fatal("specific item grant must work without a collection grant")
+	}
+	if p.DockerListDecision("container", "other", id, p.Allowed("docker", "containers", false)) {
+		t.Fatal("unknown item must remain denied")
+	}
+}
+
 func TestDockerInactiveProvenanceGrantsNothing(t *testing.T) {
 	// An inactive profile's docker grants must not affect decisions.
 	defs := map[string]Definition{"docker-wide": {Profile: config.Profile{Allow: config.Rules{Docker: []string{"*"}}}, Source: "/etc/hostlens/profiles/docker-wide.yaml"}}

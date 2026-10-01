@@ -135,8 +135,8 @@ type daemonStats struct {
 		TxBytes *uint64 `json:"tx_bytes"`
 	} `json:"networks"`
 	PidsStats struct {
-		Current *int `json:"current"`
-		Limit   *int `json:"limit"`
+		Current *int    `json:"current"`
+		Limit   *uint64 `json:"limit"`
 	} `json:"pids_stats"`
 }
 
@@ -178,15 +178,8 @@ type daemonNetwork struct {
 }
 
 type daemonDiskUsage struct {
-	LayersSize int64 `json:"LayersSize"`
-	Images     []struct {
-		ID          string   `json:"Id"`
-		RepoTags    []string `json:"RepoTags"`
-		RepoDigests []string `json:"RepoDigests"`
-		Created     int64    `json:"Created"`
-		Size        int64    `json:"Size"`
-		SharedSize  int64    `json:"SharedSize"`
-	} `json:"Images"`
+	LayersSize int64         `json:"LayersSize"`
+	Images     []daemonImage `json:"Images"`
 	Containers []struct {
 		ID         string `json:"Id"`
 		SizeRootFs int64  `json:"SizeRootFs"`

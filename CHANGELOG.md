@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Lifecycle checksum checks now stream installed files, reducing memory used during observer reconciliation and removal.
+- Docker inventories now evaluate each collection grant once per response, reducing repeated policy work for large listings.
+- Shared service sandbox settings now come from one template fragment, keeping the three systemd units consistent.
+- Release archive verification now streams member checksums, limiting memory use when validating large binaries.
+- Docker resource listings now index only the reference types they report, reducing work on large inventories.
+- TLS restart checks now hash certificate and key files as a stream, avoiding whole-file memory allocation on reload.
+- Live Docker validation runs against a private disposable engine in CI, exercising container, image, volume, and network observations without using host workloads.
+- Systemd matrix cases now require their declared native architecture, so an amd64 engine cannot report an arm64 lifecycle pass.
+- Normal diagnostic calls use one backend request instead of checking backend status again; generation mismatches still resynchronize before collection.
+- Gateway result validation reuses its serialized payload when responding to clients, reducing repeated encoding.
+- Docker inventory pages now construct payloads only for returned items, reducing work for large inventories and later pages.
+- Docker inventory policy checks avoid building unused resource forms when a collection grant suffices, reducing allocations on large inventories.
+- Process inspection reuses one bounded link-read buffer per request, reducing temporary memory for hosts with many open descriptors.
+- The tool registry now requires a separate reserved role for future remediation tools; current diagnostic tokens cannot receive that role.
+- Trusted-proxy client address parsing now avoids allocating a forwarding-chain slice on each request.
+
+### Fixed
+
+- Docker observer reconciliation now refuses unowned or replaced executable, unit, and socket paths before granting observer authority.
+- Configuration validation now rejects a shared diagnostic and administrative IPC path even when Docker diagnostics are disabled.
+- Backend tool calls now reject a second JSON document in their arguments before collection, closing an ambiguous IPC parsing path.
+- Container statistics now accept Docker's unlimited PID sentinel and omit the unavailable limit instead of failing the observation.
+- Installation and release manifests now reject undeclared fields before lifecycle changes or candidate acceptance.
+- Docker container denials now apply to every current name across inventory, detail, stats, logs, and disk-usage results, preventing alias-based policy bypasses.
+- Docker network reference counts include each container attached to a shared network.
+- Malformed or null Docker responses now fail collection instead of producing empty observations.
+- Disk-usage rows without a matching name inventory are omitted with an explicit evidence gap, so unused resources are not claimed with incomplete references.
+- The gateway rejects oversized backend responses and trailing JSON instead of accepting an incomplete or ambiguous IPC message.
+- The backend and Docker observer now reject trailing or oversized IPC messages in both directions, closing partial-decoding gaps.
+- Local status and reload commands now reject malformed or oversized replies instead of printing a truncated success response.
+- Upgrades now discover bundled profiles under paths containing glob characters and stop on unexpected profile read failures, preserving review of policy changes.
+- Configuration reload now requires positive backend acknowledgements and rejects inconsistent generation fingerprints before reporting success.
+- The Docker observer now applies trusted, bounded configuration reads and closes its inherited socket descriptor after adoption.
+- Docker refusals now report status without forwarding daemon or observer error bodies to clients.
+- Truncated Docker container inventories now block selector resolution and unused-resource estimates, preventing false resource conclusions from incomplete references.
+- Container detail, stats, and logs now recheck current aliases against policy before returning evidence, closing a rename race even for stable-ID selectors.
+- Disk-usage results now identify untagged images as dangling, matching the image inventory and advisory cleanup candidates when references are stable.
+- Lifecycle commands now reject oversized or trailing installation state before changing resources, avoiding partial manifest reads.
+- Archive extraction now rejects oversized or trailing release manifests before trusting their checksums, limiting malformed candidate input.
+
 ## 0.4.0 - 2026-09-18
 
 [Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.3.0...v0.4.0)

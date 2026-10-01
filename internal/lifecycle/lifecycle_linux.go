@@ -12,18 +12,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Monska85/hostlens/internal/config"
 	"github.com/Monska85/hostlens/internal/contract"
+	"github.com/Monska85/hostlens/internal/jsondoc"
 	"github.com/Monska85/hostlens/internal/token"
 	"go.yaml.in/yaml/v3"
 )
 
 const ManifestPath = "/var/lib/hostlens/install.json"
+const maxManifestBytes = 16 << 20
 
 type Resource struct {
 	Path    string `json:"path"`
@@ -87,11 +88,12 @@ func (m Manager) save(man *Manifest) error {
 }
 func (m Manager) Load() (Manifest, error) {
 	var man Manifest
-	b, e := os.ReadFile(m.path(ManifestPath))
+	f, e := os.Open(m.path(ManifestPath))
 	if e != nil {
 		return man, e
 	}
-	e = json.Unmarshal(b, &man)
+	defer f.Close()
+	e = jsondoc.DecodeStrict(f, maxManifestBytes, &man)
 	if e == nil && man.Version != 1 {
 		e = errors.New("unsupported installation state; migration required")
 	}
@@ -275,7 +277,7 @@ func (m Manager) Install(ctx context.Context, source string, start bool) error {
 				b, e = os.ReadFile(filepath.Join(source, "profiles", filepath.Base(r.Path)))
 			}
 			if e == nil {
-				e = token.Atomic(m.path(r.Path), b, mode)
+				e = token.AtomicNew(m.path(r.Path), b, mode)
 				r.Hash = digest(b)
 			}
 		case "state":
@@ -411,8 +413,8 @@ func (m Manager) Uninstall(ctx context.Context) error {
 				continue
 			}
 			if r.Kind == "file" && !r.Mutable {
-				b, e := os.ReadFile(p)
-				if e != nil || digest(b) != r.Hash {
+				got, e := digestFile(p)
+				if e != nil || got != r.Hash {
 					failures = append(failures, fmt.Errorf("modified binary/unit preserved: %s", r.Path))
 					continue
 				}
@@ -707,18 +709,27 @@ func (m Manager) Upgrade(ctx context.Context, archive string) error {
 			}
 		}
 	}
-	profiles, _ := filepath.Glob(filepath.Join(stage, "profiles/*.yaml"))
-	sort.Strings(profiles)
-	for _, p := range profiles {
+	profiles, e := os.ReadDir(filepath.Join(stage, "profiles"))
+	if e != nil && !errors.Is(e, os.ErrNotExist) {
+		return rollback(e)
+	}
+	for _, profile := range profiles {
+		if profile.IsDir() || !strings.HasSuffix(profile.Name(), ".yaml") {
+			continue
+		}
+		p := filepath.Join(stage, "profiles", profile.Name())
 		b, e := os.ReadFile(p)
 		if e != nil {
 			return rollback(e)
 		}
-		existing, _ := os.ReadFile(m.path("/etc/hostlens/profiles/" + filepath.Base(p)))
+		existing, e := os.ReadFile(m.path("/etc/hostlens/profiles/" + profile.Name()))
+		if e != nil && !errors.Is(e, os.ErrNotExist) {
+			return rollback(e)
+		}
 		if string(b) == string(existing) {
 			continue
 		}
-		target := filepath.Join(backup, filepath.Base(p)+".candidate")
+		target := filepath.Join(backup, profile.Name()+".candidate")
 		if e = token.Atomic(target, b, 0644); e != nil {
 			return rollback(e)
 		}

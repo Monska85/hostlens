@@ -93,8 +93,15 @@ func ValidateRegistry(definitions []ToolDefinition) error {
 		if definition.Effect != EffectDiagnostic && definition.Effect != EffectRemediation {
 			return fmt.Errorf("unknown effect for %q", definition.Name)
 		}
-		if definition.RequiredRole != RoleHealth && definition.RequiredRole != RoleInspect && definition.RequiredRole != RoleDiagnostics {
-			return fmt.Errorf("unknown role for %q", definition.Name)
+		switch definition.Effect {
+		case EffectDiagnostic:
+			if definition.RequiredRole != RoleHealth && definition.RequiredRole != RoleInspect && definition.RequiredRole != RoleDiagnostics {
+				return fmt.Errorf("invalid diagnostic role for %q", definition.Name)
+			}
+		case EffectRemediation:
+			if definition.RequiredRole != RoleRemediation {
+				return fmt.Errorf("separate remediation role required for %q", definition.Name)
+			}
 		}
 		if seen[definition.Name] {
 			return fmt.Errorf("duplicate tool %q", definition.Name)

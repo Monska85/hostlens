@@ -8,8 +8,32 @@ import (
 	"github.com/Monska85/hostlens/internal/config"
 )
 
+// Shared sandbox directives preserve each unit's effective restrictions.
+const serviceIsolationStart = `NoNewPrivileges=yes
+ProtectSystem=strict
+`
+
+const serviceIsolationEnd = `PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateIPC=yes
+`
+
+const serviceSyscalls = `LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service openat2
+SystemCallFilter=~@mount @reboot @swap @raw-io
+`
+
 func GatewayUnit() string {
-	return `[Unit]
+	return fmt.Sprintf(`[Unit]
 Description=HostLens MCP gateway
 After=hostlens-diagnostics.service
 [Service]
@@ -19,34 +43,17 @@ Group=hostlens-gateway
 ExecStart=/usr/local/bin/hostlens serve --system
 Restart=on-failure
 UMask=0027
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ProtectKernelLogs=yes
-ProtectClock=yes
-ProtectHostname=yes
-PrivateIPC=yes
-ProtectProc=invisible
+%sProtectHome=yes
+%sProtectProc=invisible
 ProcSubset=pid
 RestrictSUIDSGID=yes
-LockPersonality=yes
-RestrictRealtime=yes
-RestrictNamespaces=yes
-SystemCallArchitectures=native
-SystemCallFilter=@system-service openat2
-SystemCallFilter=~@mount @reboot @swap @raw-io
-MemoryDenyWriteExecute=yes
+%sMemoryDenyWriteExecute=yes
 CapabilityBoundingSet=
 ReadWritePaths=/run/hostlens
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 [Install]
 WantedBy=multi-user.target
-`
+`, serviceIsolationStart, serviceIsolationEnd, serviceSyscalls)
 }
 
 // ObserverSocketUnit exposes the observer IPC endpoint through socket
@@ -104,34 +111,17 @@ ExecStart=/usr/local/bin/hostlens-docker-observer serve --system
 Restart=on-failure
 RestartSec=2
 UMask=0027
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ProtectKernelLogs=yes
-ProtectClock=yes
-ProtectHostname=yes
-PrivateIPC=yes
-ProtectProc=invisible
+%sProtectHome=yes
+%sProtectProc=invisible
 ProcSubset=pid
 RestrictSUIDSGID=yes
-LockPersonality=yes
-RestrictRealtime=yes
-RestrictNamespaces=yes
-SystemCallArchitectures=native
-SystemCallFilter=@system-service openat2
-SystemCallFilter=~@mount @reboot @swap @raw-io
-MemoryDenyWriteExecute=yes
+%sMemoryDenyWriteExecute=yes
 CapabilityBoundingSet=
 IPAddressDeny=any
 RestrictAddressFamilies=AF_UNIX
 [Install]
 WantedBy=multi-user.target
-`, group)
+`, group, serviceIsolationStart, serviceIsolationEnd, serviceSyscalls)
 }
 func DiagnosticsUnit(c config.Config) string {
 	cap := ""
@@ -157,26 +147,9 @@ UMask=0007
 RuntimeDirectory=hostlens
 RuntimeDirectoryMode=0770
 RuntimeDirectoryPreserve=yes
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ProtectKernelLogs=yes
-ProtectClock=yes
-ProtectHostname=yes
-PrivateIPC=yes
-RestrictSUIDSGID=no
-LockPersonality=yes
-RestrictRealtime=yes
-RestrictNamespaces=yes
-SystemCallArchitectures=native
-SystemCallFilter=@system-service openat2
-SystemCallFilter=~@mount @reboot @swap @raw-io
-CapabilityBoundingSet=%s
+%sProtectHome=read-only
+%sRestrictSUIDSGID=no
+%sCapabilityBoundingSet=%s
 AmbientCapabilities=%s
 ReadWritePaths=/run/hostlens
 InaccessiblePaths=%s
@@ -184,5 +157,5 @@ RestrictAddressFamilies=AF_UNIX
 IPAddressDeny=any
 [Install]
 WantedBy=multi-user.target
-`, cap, cap, strings.Join(inaccessible, " "))
+`, serviceIsolationStart, serviceIsolationEnd, serviceSyscalls, cap, cap, strings.Join(inaccessible, " "))
 }

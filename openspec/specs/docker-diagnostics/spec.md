@@ -1,6 +1,7 @@
 # docker-diagnostics Specification
 
 ## Purpose
+
 Provide bounded, policy-controlled evidence from the local system-wide Docker Engine without retaining observations or exposing Docker mutation authority through MCP.
 
 ## Requirements
@@ -45,7 +46,7 @@ HostLens SHALL expose `get_docker_info`, `list_docker_containers`, `get_docker_c
 
 ### Requirement: Daemon and container evidence
 
-Docker diagnostics SHALL report selected daemon version, API, storage, cgroup, logging, security, and count information without registry credentials, proxy secrets, plugin configuration, or raw daemon configuration. Container tools SHALL provide bounded current identity, image reference and digest when available, lifecycle state, health state, restart count, timestamps, port mappings, mount type and destination, resource limits, and selected resource usage. They SHALL omit environment values, secret/config contents, commands and arguments, embedded files, raw inspect objects, and unrestricted labels or annotations.
+Docker diagnostics SHALL report selected daemon version, API, storage, cgroup, logging, security, and count information without registry credentials, proxy secrets, plugin configuration, or raw daemon configuration. Container tools SHALL provide bounded current identity, image reference and digest when available, lifecycle state, health state, restart count, timestamps, port mappings, mount type and destination, resource limits, and selected resource usage. They SHALL omit environment values, secret/config contents, commands and arguments, embedded files, raw inspect objects, and unrestricted labels or annotations. An unlimited process limit SHALL be omitted rather than interpreted as a finite limit or causing the whole stats observation to fail.
 
 #### Scenario: Unhealthy container
 
@@ -56,6 +57,11 @@ Docker diagnostics SHALL report selected daemon version, API, storage, cgroup, l
 
 - **WHEN** an authorized client requests stats for a running container
 - **THEN** HostLens returns one bounded point-in-time sample with accurate CPU, memory, block, network, and process measurements that the daemon supplies
+
+#### Scenario: Unlimited PID limit
+
+- **WHEN** Docker reports the unsigned maximum value for an unlimited PID limit
+- **THEN** HostLens returns the valid stats observation and omits the finite `pids_limit` field
 
 #### Scenario: Stopped container stats
 
@@ -105,6 +111,16 @@ HostLens SHALL classify an image or volume as currently unused only when the liv
 - **WHEN** a container reference changes while an inventory is collected
 - **THEN** HostLens marks the analysis as non-atomic or retries within its bound and never presents an uncertain resource as a guaranteed cleanup target
 
+#### Scenario: Disk-usage container lacks a live name record
+
+- **WHEN** a disk-usage container is absent from the correlated container inventory
+- **THEN** HostLens omits its row, reports the inventory gap, and suppresses unused-resource certainty
+
+#### Scenario: Dangling image in disk usage
+
+- **WHEN** a disk-usage observation includes an image with no repository tags or digests
+- **THEN** HostLens reports that image as dangling in the disk-usage projection, and includes its identity among dangling cleanup candidates only when the reference observation is stable and policy permits it
+
 ### Requirement: Bounded Docker log queries
 
 `query_docker_logs` SHALL require one policy-permitted container resolved to a stable identity and bounded since, until, count, and byte limits. It SHALL return stdout and stderr records only when the daemon logging interface supports retrieval, preserve stream and timestamp meaning, treat content as untrusted data, and report rotation and driver coverage. It SHALL NOT request follow mode or retain returned records.
@@ -142,3 +158,40 @@ Each Docker result SHALL be calculated from live daemon responses within the act
 
 - **WHEN** a Docker request succeeds, fails, times out, or is cancelled
 - **THEN** HostLens releases its observations and retains only payload-free operational metadata and aggregate service counters
+
+### Requirement: Bounded Docker failure detail
+
+Docker observation failures SHALL identify the failed boundary and error class without forwarding a Docker Engine or observer HTTP response body to the diagnostic backend or MCP client. Typed issue codes and HTTP status may be retained as payload-free failure metadata.
+
+#### Scenario: Daemon returns sensitive error text
+
+- **WHEN** Docker rejects an observation and its response body contains arbitrary text
+- **THEN** HostLens reports the refusal class without returning that text
+
+#### Scenario: Observer returns sensitive error text
+
+- **WHEN** the observer IPC returns a non-success HTTP response containing arbitrary text
+- **THEN** the diagnostic backend reports observer refusal without returning that body
+
+### Requirement: Complete reference basis for Docker conclusions
+
+Container selector resolution, derived reference counts, and unused or reclaimable classifications SHALL require a complete bounded container inventory. A truncated inventory SHALL be reported as an inventory ceiling. Correlated resource observations MAY still return directly observed fields, but SHALL omit derived reference counts and unused or reclaimable claims.
+
+#### Scenario: Selector inventory is truncated
+
+- **WHEN** the container inventory is truncated before a detail, stats, or logs observation or during identity recheck
+- **THEN** the tool fails closed without releasing that observation as a resolved container
+
+#### Scenario: Reference inventory is truncated
+
+- **WHEN** a container inventory used to correlate images, volumes, networks, or disk usage is truncated
+- **THEN** the result reports the ceiling and does not derive reference counts, unused state, or reclaimable candidates from incomplete references
+
+### Requirement: Post-observation container authorization
+
+For container detail, stats, and logs, the backend SHALL recheck the resolved identity and every current name against the applicable Docker policy after observation and before releasing evidence. This applies to both name and stable-ID selectors.
+
+#### Scenario: A denied alias appears during collection
+
+- **WHEN** a container gains a name denied by policy after the initial authorization but before its detail, stats, or logs result is returned
+- **THEN** the backend reports `policy_denied` and does not release the collected evidence

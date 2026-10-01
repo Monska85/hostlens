@@ -142,7 +142,7 @@ func (c *Collector) health(ctx context.Context, r *contract.Result) {
 			if len(f) < 3 {
 				continue
 			}
-			mount := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`).Replace(f[1])
+			mount := decodeMountField(f[1])
 			if seen[mount] {
 				continue
 			}

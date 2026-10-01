@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -47,18 +46,14 @@ func (c *client) containerLogs(ctx context.Context, r dockerobs.Request) dockero
 	if api == "" {
 		return fail(errors.New("engine API negotiation pending"))
 	}
-	u := url.URL{
-		Scheme:   "http",
-		Host:     "docker",
-		Path:     "/v" + api + "/containers/" + r.Selector + "/logs",
-		RawQuery: c.fixedQuery(r).Encode(),
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	path, err := upstreamPath(r)
 	if err != nil {
 		return fail(err)
 	}
-	req.Host = "docker"
-	req.Header.Set("User-Agent", "hostlens-docker-observer/1")
+	req, err := engineGET(ctx, "/v"+api+path, c.fixedQuery(r))
+	if err != nil {
+		return fail(err)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -73,10 +68,10 @@ func (c *client) containerLogs(ctx context.Context, r dockerobs.Request) dockero
 	if resp.StatusCode == http.StatusNotImplemented || resp.StatusCode == http.StatusBadRequest {
 		// The structured issue lets the backend report a driver gap without
 		// matching error text across the IPC boundary.
-		return dockerobs.Response{Failed: true, Reason: fmt.Errorf("%w: %s", errEngineUnsupported, engineErrorMessage(resp.Body)).Error(), Issue: "unsupported_driver"}
+		return dockerobs.Response{Failed: true, Reason: fmt.Errorf("%w (%d)", errEngineUnsupported, resp.StatusCode).Error(), Issue: "unsupported_driver"}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fail(fmt.Errorf("log request rejected (%d): %s", resp.StatusCode, engineErrorMessage(resp.Body)))
+		return fail(fmt.Errorf("log request rejected (%d)", resp.StatusCode))
 	}
 	contentType := resp.Header.Get("Content-Type")
 	tty := strings.Contains(contentType, "raw-stream")

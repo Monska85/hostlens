@@ -83,6 +83,14 @@ func newModeEngine(t *testing.T) *modeEngine {
 				entries = append(entries, fmt.Sprintf(`{"Name":"vol-%d","Driver":"local"}`, i))
 			}
 			fmt.Fprintf(w, `{"Volumes":[%s]}`, strings.Join(entries, ","))
+		case "sharednet":
+			fmt.Fprintf(w, `[{"Id":"%s","NetworkSettings":{"Networks":{"bridge":{"Name":"bridge"}}}},{"Id":"%s","NetworkSettings":{"Networks":{"bridge":{"Name":"bridge"}}}}]`, id64(1), id64(2))
+		case "danglingimage":
+			if strings.HasSuffix(req.URL.Path, "/system/df") {
+				fmt.Fprintf(w, `{"Images":[{"Id":"%s","Size":100,"SharedSize":20}]}`, id64(1))
+			} else {
+				fmt.Fprintf(w, `[{"Id":"%s","Size":100,"SharedSize":20}]`, id64(1))
+			}
 		default:
 			fmt.Fprint(w, `[]`)
 		}
@@ -136,14 +144,14 @@ func TestLogsItemErrorStatuses(t *testing.T) {
 
 	engine.set("servererror")
 	response = c.containerLogs(context.Background(), request)
-	if !response.Failed || !strings.Contains(response.Reason, "daemon refusal") {
-		t.Fatalf("500 daemon message lost: %+v", response)
+	if !response.Failed || !strings.Contains(response.Reason, "500") || strings.Contains(response.Reason, "daemon refusal") {
+		t.Fatalf("daemon error body crossed observer boundary: %+v", response)
 	}
 
 	engine.set("plainerror")
 	response = c.containerLogs(context.Background(), request)
-	if !response.Failed || !strings.Contains(response.Reason, "no usable message") {
-		t.Fatalf("500 fallback lost: %+v", response)
+	if !response.Failed || !strings.Contains(response.Reason, "500") {
+		t.Fatalf("500 refusal lost: %+v", response)
 	}
 }
 
@@ -247,6 +255,9 @@ func TestDecodeGuardsRejectMalformedAndExtraDocuments(t *testing.T) {
 	if _, _, e := decodeList[map[string]any]([]byte("{not json"), 10); e == nil {
 		t.Fatal("malformed list accepted")
 	}
+	if _, _, e := decodeList[map[string]any]([]byte(`null`), 10); e == nil {
+		t.Fatal("null list accepted")
+	}
 	if _, _, e := decodeList[struct{ N int }]([]byte(`[{"n":1},{"n":"not-a-number"}]`), 10); e == nil {
 		t.Fatal("malformed list item accepted")
 	}
@@ -260,6 +271,11 @@ func TestDecodeGuardsRejectMalformedAndExtraDocuments(t *testing.T) {
 	if e != nil || len(items) != 2 || !truncated {
 		t.Fatalf("truncation lost: %d items, %v, %v", len(items), truncated, e)
 	}
+	for _, body := range []string{`[{"n":1},{"n":2}`, `[{"n":1},{"n":2}] trailing`} {
+		if _, _, e := decodeList[map[string]any]([]byte(body), 1); e == nil {
+			t.Fatal("malformed truncated list accepted")
+		}
+	}
 	empty, truncated, e := decodeList[map[string]any]([]byte(`[]`), 10)
 	if e != nil || len(empty) != 0 || truncated {
 		t.Fatalf("empty list mishandled: %v %v %v", empty, truncated, e)
@@ -268,8 +284,14 @@ func TestDecodeGuardsRejectMalformedAndExtraDocuments(t *testing.T) {
 	if e := decodeObject([]byte("{bad"), &struct{}{}); e == nil || !strings.Contains(e.Error(), "malformed") {
 		t.Fatalf("malformed object accepted: %v", e)
 	}
+	if e := decodeObject([]byte(`null`), &struct{}{}); e == nil {
+		t.Fatal("null object accepted")
+	}
 	if e := decodeObject([]byte(`{"a":1}{"b":2}`), &map[string]any{}); e == nil || !strings.Contains(e.Error(), "multiple documents") {
 		t.Fatalf("multiple documents accepted: %v", e)
+	}
+	if e := decodeObject([]byte(`{"a":1} broken`), &map[string]any{}); e == nil || !strings.Contains(e.Error(), "malformed") {
+		t.Fatalf("malformed suffix accepted: %v", e)
 	}
 	if e := decodeObject([]byte(`{"a":1}`), &map[string]any{}); e != nil {
 		t.Fatalf("single object rejected: %v", e)
@@ -289,6 +311,22 @@ func TestDecodeGuardsRejectMalformedAndExtraDocuments(t *testing.T) {
 	}
 	if e := ensureObject(dec); e != nil {
 		t.Fatalf("single document rejected: %v", e)
+	}
+}
+
+func TestContainerListPreservesSharedNetworkPerContainer(t *testing.T) {
+	t.Parallel()
+	engine := newModeEngine(t)
+	c := newTestClient(t, engine)
+	engine.set("sharednet")
+	response := c.containerList(context.Background())
+	if response.Failed || len(response.Containers) != 2 {
+		t.Fatalf("container observation failed: %+v", response)
+	}
+	for _, item := range response.Containers {
+		if len(item.Networks) != 1 || item.Networks[0] != "bridge" {
+			t.Fatalf("shared network missing from %s: %v", item.ID, item.Networks)
+		}
 	}
 }
 
@@ -524,6 +562,21 @@ func TestProjectionHelpersEdgeInputs(t *testing.T) {
 	}
 	if mapped := portSummary(nil); len(mapped) != 0 {
 		t.Fatal("empty ports must project to an empty slice")
+	}
+}
+
+func TestDanglingImageProjectsInInventoryAndDiskUsage(t *testing.T) {
+	t.Parallel()
+	engine := newModeEngine(t)
+	c := newTestClient(t, engine)
+	engine.set("danglingimage")
+	images := c.imageList(context.Background(), dockerobs.Request{Version: 1, Operation: dockerobs.OpImageList})
+	usage := c.diskUsage(context.Background())
+	if images.Failed || usage.Failed || usage.Usage == nil || len(images.Images) != 1 || len(usage.Usage.Images) != 1 {
+		t.Fatalf("image observations failed: inventory=%+v usage=%+v", images, usage)
+	}
+	if !images.Images[0].Dangling || !usage.Usage.Images[0].Dangling {
+		t.Fatal("untagged image must be dangling in both observations")
 	}
 }
 
