@@ -33,7 +33,12 @@ Run this on a trusted workstation or the target host with the archive and `check
 ```sh
 sha256sum --ignore-missing -c checksums.txt
 mkdir -p /opt/hostlens-release
-tar -xzf hostlens-0.4.0-linux-amd64.tar.gz -C /opt/hostlens-release
+case "$(uname -m)" in
+  x86_64) arch=amd64 ;;
+  aarch64) arch=arm64 ;;
+  *) echo 'Unsupported architecture' >&2; exit 1 ;;
+esac
+tar -xzf "hostlens-0.4.0-linux-${arch}.tar.gz" -C /opt/hostlens-release
 ls /opt/hostlens-release
 ```
 
@@ -86,7 +91,10 @@ Roles are fixed: `health`, `inspect`, `diagnostics` (each includes the previous)
 
 The MCP endpoint defaults to `http://127.0.0.1:8080/mcp`. Bearer authentication is required on loopback. Call a first tool to confirm the full stack:
 
-```sh
+Enter the `secret` value from the first token command when prompted. The input is hidden and stays out of shell history.
+
+```bash
+read -rsp 'Paste the first-client secret: ' SECRET; printf '\n'
 curl -sS -X POST http://127.0.0.1:8080/mcp \
   -H "Authorization: Bearer $SECRET" \
   -H "Content-Type: application/json" \
@@ -183,6 +191,8 @@ A result with `"available": true` and the negotiated Engine API confirms the int
 `mcp.read_only`, profiles, and policy changes reload with `hostlens reload --system`. Listener, TLS material, identity, credential location, privilege, Docker observer settings, and the connection idle timeout require a restart of both services; a reload over such a change fails without applying anything.
 
 ## Upgrade
+
+Use the archive for the target host. Replace `amd64` with `arm64` on arm64 hosts.
 
 ```sh
 hostlens upgrade --archive hostlens-0.4.0-linux-amd64.tar.gz --apply

@@ -16,7 +16,7 @@ There is no remediation, no shell execution, no background monitoring, and no ca
 
 Root on a Linux target host with systemd and kernel 5.6 or newer (the first tool call needs `openat2`):
 
-```sh
+```bash
 # 1. Download the newest release archive and checksums (repository readers
 #    can use gh; a browser works too):
 gh release download v0.4.0 -R Monska85/hostlens \
@@ -25,13 +25,19 @@ gh release download v0.4.0 -R Monska85/hostlens \
 # 2. Verify, extract, install, and start:
 sha256sum --ignore-missing -c checksums.txt
 mkdir -p /opt/hostlens-release
-tar -xzf hostlens-0.4.0-linux-amd64.tar.gz -C /opt/hostlens-release
+case "$(uname -m)" in
+  x86_64) arch=amd64 ;;
+  aarch64) arch=arm64 ;;
+  *) echo 'Unsupported architecture' >&2; exit 1 ;;
+esac
+tar -xzf "hostlens-0.4.0-linux-${arch}.tar.gz" -C /opt/hostlens-release
 /opt/hostlens-release/hostlens install --source /opt/hostlens-release --privilege standard --apply --start
 
 # 3. Issue a token; the secret prints once:
 /usr/local/bin/hostlens token create --system \
   --name first-client --roles diagnostics \
   --expires "$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ)"
+read -rsp 'Paste the secret from the token output: ' SECRET; printf '\n'
 
 # 4. Confirm the full stack with one call:
 curl -sS -X POST http://127.0.0.1:8080/mcp \
@@ -80,7 +86,7 @@ The full path, including restricted privilege, Docker diagnostics, profiles, and
 | Remediate anything         | Read-only effect registry enforced at HTTP, session, per-call, and backend layers; remediation is rejected in v1 |
 | Monitor in the background  | Work happens only on request, under bounded admission with no periodic host polling                              |
 | Call model providers       | The gateway and backend terminate MCP and read the host; they never call out                                     |
-| Return secrets or payloads | Source policy, secret masks, and payload-free audit records keep credentials and inspected content out of sight  |
+| Retain diagnostic evidence | Request-scoped observations are released after collection; audit records contain no inspected payloads           |
 
 ## 🏗 Architecture
 
@@ -119,7 +125,7 @@ Profiles constrain supported diagnostic requests, not a compromised privileged p
 ## ✅ Validation
 
 - Go race suite, vet, and amd64/arm64 builds in disposable containers; 86.8% internal statement coverage.
-- A 12-case container acceptance matrix that extracts and executes the exact release candidate, including native arm64 systemd install/upgrade/removal on hosted runners.
+- CI defines a 12-case container acceptance matrix for the exact release candidate, including native arm64 systemd lifecycle cases. The current revision's hosted result remains unverified.
 - Strict OpenSpec validation; the [specifications](openspec/specs) are authoritative.
 - Checksum-verified archives with a shipped-documentation link check; build provenance attestations activate when GitHub offers them for the repository.
 - Fresh `govulncheck` scan with no reachable vulnerabilities at scan time.

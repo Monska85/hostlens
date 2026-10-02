@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Installation examples now select the host architecture and prompt for the one-time token secret, so the first diagnostic call works on both supported architectures without placing the secret in shell history.
 - Docker observer reconciliation now refuses unowned or replaced executable, unit, and socket paths before granting observer authority.
 - Configuration validation now rejects a shared diagnostic and administrative IPC path even when Docker diagnostics are disabled.
 - Backend tool calls now reject a second JSON document in their arguments before collection, closing an ambiguous IPC parsing path.
