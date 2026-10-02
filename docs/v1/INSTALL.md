@@ -38,7 +38,7 @@ case "$(uname -m)" in
   aarch64) arch=arm64 ;;
   *) echo 'Unsupported architecture' >&2; exit 1 ;;
 esac
-tar -xzf "hostlens-0.4.0-linux-${arch}.tar.gz" -C /opt/hostlens-release
+tar -xzf "hostlens-0.5.0-linux-${arch}.tar.gz" -C /opt/hostlens-release
 ls /opt/hostlens-release
 ```
 
@@ -195,7 +195,7 @@ A result with `"available": true` and the negotiated Engine API confirms the int
 Use the archive for the target host. Replace `amd64` with `arm64` on arm64 hosts.
 
 ```sh
-hostlens upgrade --archive hostlens-0.4.0-linux-amd64.tar.gz --apply
+hostlens upgrade --archive hostlens-0.5.0-linux-amd64.tar.gz --apply
 ```
 
 The upgrade verifies every archive member, retains the previous executables, preserves configuration, tokens, and active profiles, and restarts only previously active services. Changed bundled profiles are saved as `.candidate` files for review. Upgrading from a release that predates the Docker observer does not install the new binary (the running release performs the upgrade). After enabling the section, restore the binary from the extracted release once:

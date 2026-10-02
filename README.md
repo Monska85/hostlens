@@ -19,8 +19,8 @@ Root on a Linux target host with systemd and kernel 5.6 or newer (the first tool
 ```bash
 # 1. Download the newest release archive and checksums (repository readers
 #    can use gh; a browser works too):
-gh release download v0.4.0 -R Monska85/hostlens \
-  -p 'hostlens-0.4.0-linux-*.tar.gz' -p checksums.txt
+gh release download v0.5.0 -R Monska85/hostlens \
+  -p 'hostlens-0.5.0-linux-*.tar.gz' -p checksums.txt
 
 # 2. Verify, extract, install, and start:
 sha256sum --ignore-missing -c checksums.txt
@@ -30,7 +30,7 @@ case "$(uname -m)" in
   aarch64) arch=arm64 ;;
   *) echo 'Unsupported architecture' >&2; exit 1 ;;
 esac
-tar -xzf "hostlens-0.4.0-linux-${arch}.tar.gz" -C /opt/hostlens-release
+tar -xzf "hostlens-0.5.0-linux-${arch}.tar.gz" -C /opt/hostlens-release
 /opt/hostlens-release/hostlens install --source /opt/hostlens-release --privilege standard --apply --start
 
 # 3. Issue a token; the secret prints once:
@@ -125,7 +125,7 @@ Profiles constrain supported diagnostic requests, not a compromised privileged p
 ## ✅ Validation
 
 - Go race suite, vet, and amd64/arm64 builds in disposable containers; 86.8% internal statement coverage.
-- CI defines a 12-case container acceptance matrix for the exact release candidate, including native arm64 systemd lifecycle cases. The current revision's hosted result remains unverified.
+- CI defines a 12-case container acceptance matrix for the exact release candidate, including native arm64 systemd lifecycle cases. Check the hosted run for the specific commit before relying on its result.
 - Strict OpenSpec validation; the [specifications](openspec/specs) are authoritative.
 - Checksum-verified archives with a shipped-documentation link check; build provenance attestations activate when GitHub offers them for the repository.
 - Fresh `govulncheck` scan with no reachable vulnerabilities at scan time.

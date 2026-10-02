@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-02
+
+[Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.4.0...v0.5.0)
+
 ### Changed
 
 - Lifecycle checksum checks now stream installed files, reducing memory used during observer reconciliation and removal.

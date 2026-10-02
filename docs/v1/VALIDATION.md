@@ -151,4 +151,6 @@ The 5,000-item container inventory benchmark measured five runs in the same disp
 
 The local race, vet, Linux and portable build suite passed after these changes; instrumented internal statement coverage measured 86.8%. Both snapshot archives passed checksum, member, and documentation-link verification.
 
-The eight distribution, emulated arm64, and application fixture cases passed, as did the two amd64 systemd privilege modes and private nested Docker acceptance. The container-owned Go vulnerability scan found no known vulnerabilities at scan time. Native arm64 systemd, hosted CI for this revision, and sustained production load remain unverified locally.
+The eight distribution, emulated arm64, and application fixture cases passed, as did the two amd64 systemd privilege modes and private nested Docker acceptance. The container-owned Go vulnerability scan found no known vulnerabilities at scan time. Sustained production load remains unverified.
+
+The [hosted CI run for `bd9de19`](https://github.com/Monska85/hostlens/actions/runs/37061781943) subsequently passed all required jobs, including both native arm64 systemd privilege modes and the CI gate. Release-tag validation must run on the final versioned commit before its draft is created.
