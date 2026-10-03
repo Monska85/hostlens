@@ -65,7 +65,7 @@ jobs:
             dist/archives/hostlens-*-linux-arm64.tar.gz
             dist/archives/hostlens-*-tools.json
             dist/archives/checksums.txt
-      - name: Upload verified archives to a draft release
+      - name: Publish verified archives as a final release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -73,7 +73,7 @@ jobs:
         run: |
           version=${RELEASE_TAG#v}
           if gh release view "${RELEASE_TAG}" > /dev/null 2>&1; then
-            printf 'FAIL: release %s already exists (draft or published); a retried run must not create a duplicate. Reuse, extend, or delete that release explicitly.\n' "${RELEASE_TAG}" >&2
+            printf 'FAIL: release %s already exists; a retried run must not create a duplicate. Inspect the existing release before retrying.\n' "${RELEASE_TAG}" >&2
             exit 1
           fi
           # Release notes come from the hand-maintained CHANGELOG section for
@@ -89,5 +89,5 @@ jobs:
           set -- "hostlens-${version}-linux-amd64.tar.gz" "hostlens-${version}-linux-arm64.tar.gz" "hostlens-${version}-tools.json" checksums.txt
           for asset do test -f "${asset}"; done
           case "${version}" in *-*) set -- "$@" --prerelease ;; esac
-          gh release create "${RELEASE_TAG}" "$@" --verify-tag --draft --notes "${notes}"
-          printf 'PASS: uploaded tested archives to draft %s\n' "${RELEASE_TAG}"
+          gh release create "${RELEASE_TAG}" "$@" --verify-tag --notes "${notes}"
+          printf 'PASS: published tested archives as final release %s\n' "${RELEASE_TAG}"

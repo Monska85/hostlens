@@ -1,0 +1,484 @@
+[
+  {
+    "description": "Observe one permitted Docker container by stable ID.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "full 64-character hexadecimal container ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "container_status",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "names": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            },
+            "observed_at": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "observed_at",
+            "id"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "container"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "description": "Observe the configured local Docker Engine.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "docker_status",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "additionalProperties": false,
+          "properties": {
+            "api_version": {
+              "type": "string"
+            },
+            "architecture": {
+              "type": "string"
+            },
+            "observed_at": {
+              "type": "string"
+            },
+            "os": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "observed_at"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        },
+        "issues": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "kind"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "description": "Observe current host identity and resource status.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "host_status",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "kind"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "kernel": {
+          "type": "string"
+        },
+        "load_one": {
+          "type": [
+            "null",
+            "number"
+          ]
+        },
+        "logical_cpus": {
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "memory_total_bytes": {
+          "minimum": 0,
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "memory_used_bytes": {
+          "minimum": 0,
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "root_disk_total_bytes": {
+          "minimum": 0,
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "root_disk_used_bytes": {
+          "minimum": 0,
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "uptime_seconds": {
+          "minimum": 0,
+          "type": [
+            "null",
+            "integer"
+          ]
+        }
+      },
+      "required": [
+        "observed_at",
+        "architecture"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "description": "Observe permitted current Docker container states.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "name": "list_docker_containers",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "containers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "names": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "observed_at": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "observed_at",
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "observed_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "observed_at",
+        "containers",
+        "limit"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "description": "Restart one explicitly permitted Docker container.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "full stable hexadecimal container ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "restart_container",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "completed": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
+        "container": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "names": {
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "null",
+                "array"
+              ]
+            },
+            "observed_at": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "observed_at",
+            "id"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        },
+        "invoked": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
+        "issue": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "description": "Restart one explicitly permitted native service.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "native service identifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "restart_service",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "completed": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
+        "invoked": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
+        "issue": {
+          "type": "string"
+        },
+        "service": {
+          "additionalProperties": false,
+          "properties": {
+            "availability": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "observed_at": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "observed_at",
+            "name"
+          ],
+          "type": [
+            "null",
+            "object"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "description": "Observe one permitted native service.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "native service identifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "service_status",
+    "outputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "service": {
+          "additionalProperties": false,
+          "properties": {
+            "availability": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "observed_at": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "observed_at",
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "type": "object"
+    }
+  }
+]

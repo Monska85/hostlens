@@ -100,5 +100,5 @@ timeout --signal=TERM --kill-after=5s 240s docker run --rm --pull=never \
   -e HOSTLENS_LIVE_DOCKER_SOCKET=/dind/docker.sock \
   -e HOSTLENS_LIVE_DOCKER_FIXTURES=1 \
   "$checks" /bin/sh -eu -c \
-  'cd /source; docker load -i /fixtures/busybox.tar; go test -count=1 -timeout=180s -run "^TestLiveDockerEngine" ./internal/platform/linux'
+  'cd /source; docker load -i /fixtures/busybox.tar; go test -count=1 -timeout=180s -run "^TestPrivateLiveDocker$" ./internal/containers'
 printf '%s\n' 'PASS: private live Docker observer acceptance'

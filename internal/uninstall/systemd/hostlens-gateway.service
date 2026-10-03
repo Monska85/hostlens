@@ -1,0 +1,23 @@
+[Unit]
+Description=HostLens MCP gateway
+After=network.target
+
+[Service]
+Type=simple
+User=hostlens-gateway
+Group=hostlens-shared
+SupplementaryGroups=hostlens-tokens
+ExecStart=/usr/local/bin/hostlens serve --config /etc/hostlens/config.yaml
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+TasksMax=128
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

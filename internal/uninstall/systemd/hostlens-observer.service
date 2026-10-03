@@ -1,0 +1,26 @@
+[Unit]
+Description=HostLens Docker observer
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=hostlens-observer
+Group=hostlens-shared
+SupplementaryGroups=docker
+ExecStart=/usr/local/bin/hostlens observer --config /etc/hostlens/config.yaml
+RuntimeDirectory=hostlens-observer
+RuntimeDirectoryMode=0750
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+TasksMax=64
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

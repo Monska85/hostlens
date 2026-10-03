@@ -1,6 +1,6 @@
 module github.com/Monska85/hostlens/tools/dev
 
-go 1.27.0
+go 1.27.1
 
 tool (
 	github.com/rhysd/actionlint/cmd/actionlint
@@ -9,7 +9,7 @@ tool (
 )
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.2 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/google/renameio/v2 v2.0.2 // indirect
@@ -24,9 +24,9 @@ require (
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/tools v0.50.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260924152758-ed294f943157 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/tools v0.51.0 // indirect
 	golang.org/x/vuln v1.8.0 // indirect
 	mvdan.cc/editorconfig v0.3.0 // indirect
 	mvdan.cc/sh/v3 v3.14.1 // indirect

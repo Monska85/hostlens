@@ -1,0 +1,4 @@
+allow:
+  - effect: observe
+    tool: host_status
+    resource: host

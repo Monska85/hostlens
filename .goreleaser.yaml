@@ -13,8 +13,8 @@ before:
   hooks:
     - python3 -B tools/release/prepare.py version -- {{ .Version }}
     - python3 -B tools/release/prepare.py clean
-    - env GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-X github.com/Monska85/hostlens/internal/contract.Version={{ .Version }}" -o dist/linux-amd64/ ./cmd/...
-    - env GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags "-X github.com/Monska85/hostlens/internal/contract.Version={{ .Version }}" -o dist/linux-arm64/ ./cmd/...
+    - env GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-X github.com/Monska85/hostlens/internal/app.Version={{ .Version }}" -o dist/linux-amd64/hostlens ./cmd/hostlens
+    - env GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags "-X github.com/Monska85/hostlens/internal/app.Version={{ .Version }}" -o dist/linux-arm64/hostlens ./cmd/hostlens
     - python3 -B tools/release/prepare.py manifest -- {{ .Version }}
 builds:
   - skip: true
@@ -24,7 +24,7 @@ archives:
     name_template: hostlens-{{ .Version }}-linux-amd64
     formats: [tar.gz]
     files:
-      - src: dist/linux-amd64/hostlens*
+      - src: dist/linux-amd64/hostlens
         strip_parent: true
         info: &executable
           mode: 0755
@@ -42,6 +42,10 @@ archives:
         dst: profiles
         strip_parent: true
         info: *document
+      - src: dist/linux-amd64/systemd/*
+        dst: systemd
+        strip_parent: true
+        info: *document
       - src: dist/linux-amd64/licenses/*
         dst: licenses
         strip_parent: true
@@ -51,7 +55,7 @@ archives:
     name_template: hostlens-{{ .Version }}-linux-arm64
     formats: [tar.gz]
     files:
-      - src: dist/linux-arm64/hostlens*
+      - src: dist/linux-arm64/hostlens
         strip_parent: true
         info: *executable
       - src: dist/linux-arm64/{LICENSE,NOTICE.txt,*.json,*.yaml,*.md}
@@ -59,6 +63,10 @@ archives:
         info: *document
       - src: dist/linux-arm64/profiles/*
         dst: profiles
+        strip_parent: true
+        info: *document
+      - src: dist/linux-arm64/systemd/*
+        dst: systemd
         strip_parent: true
         info: *document
       - src: dist/linux-arm64/licenses/*
