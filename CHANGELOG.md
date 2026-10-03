@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-04
+
+[Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.5.0...v0.6.0)
+
+### Added
+
+- Add opt-in, separately authorized restarts for exact systemd units and full Docker container IDs, with live target rechecks before each action.
+- Add a checked 0.5.0 migration command that prepares a separate candidate, preserves bearer credentials, and reports grants that need manual review.
+- Add `hostlens uninstall` preview and apply commands that remove verified 0.6.0 services and binary without scanning large mounted filesystems; the command clearly reports retained accounts and administrator data.
+- Add verified `install` and `upgrade` previews and root-only apply commands; a plan digest guards changes, and a failed activation restores installed files.
+- Add bounded service discovery and journal evidence, plus Docker health, stats, and logs, with separate profile grants for sensitive output.
+- Add `policy explain` for local rule decisions and payload-free repair audit events for each attempted restart.
+
+### Changed
+
+- Replace the MCP catalog with eleven typed host, service, and Docker tools; clients must update calls and profile grants.
+- Start with read-only access and explicit observe or repair roles and per-tool target grants; matching denials override grants.
+- Ship one Linux amd64 or arm64 binary per archive with dedicated gateway, Docker observer, and repair systemd units.
+- Build with Go 1.27.1 and current stable MCP, system, Docker, CLI, and filesystem libraries.
+- Require an explicit expiry or `never` choice when creating or rotating a token, so credentials no longer become non-expiring by omission.
+
+### Fixed
+
+- Command help and flags come from Cobra and work without a configuration file.
+- Docker observation and repair now use fixed operations and bounded responses instead of accepting raw API paths.
+- Installation guides now use the binary's verified installer for service accounts and protected files, then show the first MCP call, optional Docker access, repair activation, and bounded uninstall.
+- MCP discovery and results carry no reusable public cache policy, preventing cross-client reuse of profile-specific metadata.
+
+### Removed
+
+- Remove the previous file, package, and raw diagnostic tools and their configuration fields; their grants do not carry into 0.6.0. Follow [the upgrade guide](https://github.com/Monska85/hostlens/blob/v0.6.0/UPGRADING.md) before replacing 0.5.0.
+
 ## 0.5.0 - 2026-10-02
 
 [Compare with previous release](https://github.com/Monska85/hostlens/compare/v0.4.0...v0.5.0)

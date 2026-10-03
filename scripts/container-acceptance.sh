@@ -1,50 +1,31 @@
 #!/bin/sh
 set -eu
 
-# Run only inside the disposable tool container created by test-container.sh.
 if [ "${1:-test}" = archives ]; then
-  cd /source
-  go build -o /tmp/archive ./tools/archive
   cd /archives
-  # checksums.txt may also carry the standalone tools.json asset line uploaded
-  # at publish time; filter it here and verify the two archives strictly.
-  sort checksums.txt | grep -v "hostlens-${HOSTLENS_VERSION}-tools.json" >/tmp/hostlens-checksums
-  sha256sum "hostlens-${HOSTLENS_VERSION}-linux-amd64.tar.gz" "hostlens-${HOSTLENS_VERSION}-linux-arm64.tar.gz" | sort | diff /tmp/hostlens-checksums -
-  for arch in amd64 arm64; do
-    /tmp/archive -archive "hostlens-${HOSTLENS_VERSION}-linux-${arch}.tar.gz" -dest "/tmp/extracted-${arch}" -arch "${arch}" -version "${HOSTLENS_VERSION}"
-  done
-  # The tool-contract snapshot is architecture-independent by construction;
-  # both archives must carry byte-identical copies.
-  cmp "/tmp/extracted-amd64/tools.json" "/tmp/extracted-arm64/tools.json"
-  # Every shipped markdown link resolves inside the archive or points at the
-  # repository GitHub URL; repo-only relative targets are rewritten at build
-  # time by tools/release/prepare.py.
-  python3 -B /source/tools/release/check_doc_links.py /tmp/extracted-amd64 /tmp/extracted-arm64
+  grep -v "hostlens-${HOSTLENS_VERSION}-tools.json" checksums.txt >/tmp/hostlens-archive-checksums
+  sha256sum --check --strict /tmp/hostlens-archive-checksums
+  python3 -B /source/tools/release/verify.py /archives "${HOSTLENS_VERSION}"
   exit 0
 fi
+
 mkdir /tmp/work
 cp -R /source/go.mod /source/go.sum /source/cmd /source/internal \
-  /source/.github /source/packaging /source/scripts /source/tools /source/docs /source/LICENSE /source/NOTICE /tmp/work/
+  /source/packaging /source/scripts /source/tools /source/docs /source/LICENSE /source/NOTICE /tmp/work/
 cd /tmp/work
 
 go version
-cat /etc/os-release
-if ! go list -deps ./cmd/... >/dev/null; then
-  printf '%s\n' 'Module cache incomplete; run go mod download with the selected GOMODCACHE before retrying.' >&2
-  exit 1
-fi
+printf '%s\n' 'HOSTLENS_STAGE: module integrity'
+go mod verify
 
 if [ "${1:-test}" = benchmark ]; then
-  printf '%s\n' 'HOSTLENS_STAGE: benchmark representative request paths'
-  go test -run '^$' -bench 'Benchmark(Status|Allowed|ServiceRequest|DockerInventory|ProcessLink)' \
-    -benchmem -benchtime=200ms -count=5 ./internal/backend ./internal/gateway ./internal/policy ./internal/platform/linux
-  printf '%s\n' 'PASS: container benchmarks completed'
+  printf '%s\n' 'HOSTLENS_STAGE: bounded MCP benchmark'
+  go test -run '^$' -bench 'BenchmarkGateway' -benchmem -benchtime=200ms -count=5 ./internal/server
+  printf '%s\n' 'PASS: benchmark completed'
   exit 0
 fi
 
-printf '%s\n' 'HOSTLENS_STAGE: validate module integrity'
-go mod verify
-printf '%s\n' 'HOSTLENS_STAGE: run go race tests'
+printf '%s\n' 'HOSTLENS_STAGE: race tests'
 if [ "${1:-test}" = coverage ]; then
   mkdir /tmp/coverage-data
   go test -race -count=1 -timeout=180s -coverpkg=./internal/... ./... -args -test.gocoverdir=/tmp/coverage-data
@@ -55,23 +36,20 @@ if [ "${1:-test}" = coverage ]; then
 else
   go test -race -count=1 -timeout=180s ./...
 fi
-printf '%s\n' 'HOSTLENS_STAGE: run go vet'
+printf '%s\n' 'HOSTLENS_STAGE: vet'
 go vet ./...
-printf '%s\n' 'HOSTLENS_STAGE: build linux candidates'
+printf '%s\n' 'HOSTLENS_STAGE: Linux amd64 and arm64 builds'
 for arch in amd64 arm64; do
-  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -trimpath \
-    -o "/tmp/build/${arch}/" ./cmd/...
+  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -trimpath -o "/tmp/hostlens-${arch}" ./cmd/hostlens
 done
-printf '%s\n' 'HOSTLENS_STAGE: check portable build boundaries'
-# Shared protocol, policy and observer contracts must remain free of native runtime APIs.
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./internal/contract ./internal/config ./internal/policy ./internal/token ./internal/backend ./internal/gateway ./internal/dockerobs
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./internal/contract ./internal/config ./internal/policy ./internal/token ./internal/backend ./internal/gateway ./internal/dockerobs
+printf '%s\n' 'HOSTLENS_STAGE: portable interface builds'
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o /tmp/hostlens-darwin-arm64 ./cmd/hostlens
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /tmp/hostlens-windows-amd64.exe ./cmd/hostlens
+printf '%s\n' 'HOSTLENS_STAGE: generated MCP contract'
+go run ./tools/contract >/tmp/tools.json
+cmp /tmp/tools.json docs/current/tools.json
+printf '%s\n' 'HOSTLENS_STAGE: source formatting'
 test -z "$(gofmt -l cmd internal tools)"
-
-printf '%s\n' 'HOSTLENS_STAGE: test release utilities'
+python3 -B -m compileall -q tools/release
 python3 -B -m unittest discover -s tools/release -p 'test_*.py'
-printf '%s\n' 'HOSTLENS_STAGE: test matrix orchestration'
-python3 -B -m unittest discover -s tools/test-matrix -p 'test_*.py'
-printf '%s\n' 'HOSTLENS_STAGE: test developer commands'
-python3 -B -m unittest discover -s tools/dev -p 'test_*.py'
 printf '%s\n' 'PASS: container validation completed'

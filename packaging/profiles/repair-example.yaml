@@ -1,0 +1,9 @@
+# Activate only after enabling the separate repair service and assigning a
+# repair-role token. Replace the sample targets with exact local identities.
+allow:
+  - effect: repair
+    tool: restart_service
+    resource: example.service
+  - effect: repair
+    tool: restart_container
+    resource: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

@@ -5,119 +5,43 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      disable_cache:
-        description: Run without hosted caches
-        type: boolean
-        default: false
   workflow_call:
     inputs:
-      disable_cache:
-        type: boolean
-        default: false
       release_validation:
         type: boolean
         default: false
 
-concurrency:
-  group: ${{ github.workflow }}-ci-${{ github.event_name }}-${{ (inputs.release_validation || github.ref_type == 'tag') && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ !inputs.release_validation && github.ref_type != 'tag' }}
-
-env:
-  CACHE_TRUST: ${{ (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref_type == 'tag') && 'trusted' || 'branch' }}
-
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ !inputs.release_validation && github.ref_type != 'tag' }}
+
 jobs:
   checks:
-    name: Go and static checks
+    name: Source, private fixtures, and candidate
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    env:
-      GOTOOLCHAIN: local
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: ${{ !inputs.disable_cache }}
       - name: Install validation tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck python3-venv
           make deps
-      - name: Prepare Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      - name: Prepare validation image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: packaging/tests/Dockerfile.checks
-          load: true
-          tags: hostlens-checks:local
-          cache-from: ${{ !inputs.disable_cache && format('type=gha,scope=checks-{0}-{1}', runner.arch, env.CACHE_TRUST) || '' }}
-          cache-to: ${{ !inputs.disable_cache && format('type=gha,scope=checks-{0}-{1},mode=max,ignore-error=true', runner.arch, env.CACHE_TRUST) || '' }}
-      - name: Restore container compiler cache
-        if: ${{ !inputs.disable_cache }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/hostlens-go-build
-          key: container-go-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_TRUST }}-${{ hashFiles('go.mod', 'packaging/tests/Dockerfile.checks', 'tools/dev/go.mod', 'tools/dev/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            container-go-${{ runner.os }}-${{ runner.arch }}-${{ env.CACHE_TRUST }}-${{ hashFiles('go.mod', 'packaging/tests/Dockerfile.checks', 'tools/dev/go.mod', 'tools/dev/go.sum') }}-
-      - name: Select optional compiler cache
-        if: ${{ !inputs.disable_cache }}
-        run: |
-          mkdir -p "${RUNNER_TEMP}/hostlens-go-build"
-          chmod 700 "${RUNNER_TEMP}/hostlens-go-build"
-          printf 'HOSTLENS_BUILD_CACHE=%s/hostlens-go-build\n' "${RUNNER_TEMP}" >> "${GITHUB_ENV}"
-      - name: Dependency vulnerability scan
-        run: make scan-vulnerabilities
-      - name: Shared local and CI checks
-        run: |
-          make fmt-check lint coverage
-          printf '%s\n' 'PASS: source and container checks'
-      - name: Prepare private live Docker fixtures
-        run: make prepare-live-docker
-      - name: Live Docker observer acceptance
-        run: make test-live-docker
-      - name: Retain Go coverage reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: go-coverage
-          path: coverage/
-          if-no-files-found: error
-          retention-days: 7
-
-  build:
-    name: Build candidate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    outputs:
-      matrix: ${{ steps.metadata.outputs.matrix }}
-      version: ${{ steps.metadata.outputs.version }}
-    env:
-      GOTOOLCHAIN: local
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version-file: go.mod
-          cache: ${{ !inputs.disable_cache }}
-      - name: Prepare GoReleaser
+      - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
-          version: v2.18.1
+          version: v2.18.2
           install-only: true
-      - name: Validate packaging configuration
-        run: make release-check
-      - name: Select candidate and shared matrix
-        id: metadata
+      - name: Select candidate version
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
@@ -126,20 +50,34 @@ jobs:
           if [ "${REF_TYPE}" = tag ]; then
             version=$(python3 -B tools/release/prepare.py version -- "${REF_NAME#v}")
           fi
-          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
-          printf 'HOSTLENS_VERSION=%s\n' "${version}" >> "${GITHUB_ENV}"
-          printf 'matrix=%s\n' "$(python3 -B tools/test-matrix/main.py --json)" >> "${GITHUB_OUTPUT}"
-      - name: Build candidate once
+          printf 'HOSTLENS_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+      - name: Prepare disposable check image
+        run: make test-image
+      - name: Formatting and static analysis
+        run: make fmt-check lint
+      - name: Race tests, vet, contracts, and portable builds
+        run: make test
+      - name: Dependency vulnerability scan
+        run: make scan-vulnerabilities
+      - name: Prepare pinned private Docker fixtures
+        run: make prepare-live-docker
+      - name: Test private Docker observation and restart
+        run: make test-live-docker
+      - name: Validate release configuration
+        run: make release-check
+      - name: Build exact Linux candidates
+        run: make package
+      - name: Verify archive members and checksums
+        run: make verify-archives
+      - name: Prepare disposable systemd image
+        run: make systemd-image
+      - name: Test amd64 install and repair in systemd container
+        run: make test-systemd
+      - name: Include standalone MCP contract asset
         run: |
-          printf 'Building candidate %s for linux/amd64 and linux/arm64\n' "${HOSTLENS_VERSION}"
-          go mod download
-          make package
-          (cd dist/archives && sha256sum --check --strict checksums.txt)
-          # Publish the committed tools snapshot once as a standalone asset and
-          # include it in checksums.txt next to the archives.
           cp dist/linux-amd64/tools.json "dist/archives/hostlens-${HOSTLENS_VERSION}-tools.json"
           (cd dist/archives && sha256sum "hostlens-${HOSTLENS_VERSION}-tools.json" >> checksums.txt)
-          printf '%s\n' 'PASS: candidate ready for archive and runtime acceptance'
+          (cd dist/archives && sha256sum --check --strict checksums.txt)
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tested-candidate
@@ -150,20 +88,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  matrix:
-    name: Container / ${{ matrix.target }}
-    needs: build
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix: ${{ fromJSON(needs.build.outputs.matrix) }}
-    env:
-      HOSTLENS_VERSION: ${{ needs.build.outputs.version }}
-      CASE_TARGET: ${{ matrix.target }}
-      CASE_IMAGE: ${{ matrix.image }}
-      CASE_ARCH: ${{ matrix.arch }}
+  native-arm64:
+    name: Native arm64 candidate
+    needs: checks
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -172,49 +101,35 @@ jobs:
         with:
           name: tested-candidate
           path: dist/archives
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version-file: go.mod
-          cache: ${{ !inputs.disable_cache }}
-      - name: Prepare acceptance helper dependencies
-        run: go mod download
-      - name: Prepare platform image
-        if: matrix.kind == 'platform'
-        run: |
-          test "$(scripts/container-arch.sh)" = "${CASE_ARCH}"
-          docker pull --platform "linux/${CASE_ARCH}" "${CASE_IMAGE}"
-      - name: Prepare Buildx
-        if: matrix.kind == 'systemd'
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      - name: Prepare systemd image
-        if: matrix.kind == 'systemd'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: packaging/tests/Dockerfile
-          load: true
-          tags: ${{ matrix.image }}
-          cache-from: ${{ !inputs.disable_cache && format('type=gha,scope=systemd-{0}-{1}', runner.arch, env.CACHE_TRUST) || '' }}
-          cache-to: ${{ !inputs.disable_cache && format('type=gha,scope=systemd-{0}-{1},mode=max,ignore-error=true', runner.arch, env.CACHE_TRUST) || '' }}
-      - name: Run selected container case
+      - name: Select candidate version
         env:
-          TMPDIR: ${{ runner.temp }}
-        run: python3 -B tools/test-matrix/main.py "${CASE_TARGET}"
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=0.1.0-dev
+          if [ "${REF_TYPE}" = tag ]; then
+            version=$(python3 -B tools/release/prepare.py version -- "${REF_NAME#v}")
+          fi
+          printf 'HOSTLENS_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+      - name: Verify native architecture
+        run: test "$(scripts/container-arch.sh)" = arm64
+      - name: Prepare disposable systemd image
+        run: make systemd-image
+      - name: Test arm64 install and repair in systemd container
+        run: make test-systemd
 
   gate:
     name: CI gate
-    needs: [checks, build, matrix]
+    needs: [checks, native-arm64]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require every check and container case
+      - name: Require both candidate checks
         env:
-          CHECKS_RESULT: ${{ needs.checks.result }}
-          BUILD_RESULT: ${{ needs.build.result }}
-          MATRIX_RESULT: ${{ needs.matrix.result }}
+          CHECKS: ${{ needs.checks.result }}
+          ARM64: ${{ needs.native-arm64.result }}
         run: |
-          printf 'CI gate: checks=%s build=%s matrix=%s\n' "${CHECKS_RESULT}" "${BUILD_RESULT}" "${MATRIX_RESULT}"
-          test "${CHECKS_RESULT}" = success
-          test "${BUILD_RESULT}" = success
-          test "${MATRIX_RESULT}" = success
+          printf 'CI gate: checks=%s native_arm64=%s\n' "$CHECKS" "$ARM64"
+          test "$CHECKS" = success
+          test "$ARM64" = success

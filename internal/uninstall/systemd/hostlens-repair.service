@@ -1,0 +1,23 @@
+[Unit]
+Description=HostLens narrowly scoped repair worker
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=hostlens-shared
+ExecStart=/usr/local/bin/hostlens repair --config /etc/hostlens/config.yaml
+RuntimeDirectory=hostlens-repair
+RuntimeDirectoryMode=0750
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+TasksMax=64
+MemoryMax=128M
+TimeoutStopSec=40s
+
+[Install]
+WantedBy=multi-user.target

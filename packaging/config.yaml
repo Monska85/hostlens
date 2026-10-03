@@ -1,22 +1,15 @@
-version: 1
-mode: system
-privilege: standard
-
-mcp:
-  read_only: true
-
-metrics:
-  enabled: true
-  allow_anonymous: false
-
-# Docker diagnostics are opt-in and disabled by default. After setting
-# enabled to true, run `hostlens reconcile --system` to provision the
-# isolated observer, then grant Docker resources through a profile.
-# The daemon socket must be a rootful system-wide engine socket owned by
-# root with the listed access group; rootless and remote engines are
-# unsupported.
-# docker:
-#   enabled: true
-#   daemon_socket: /var/run/docker.sock
-#   observer_socket: /run/hostlens/docker-observer.sock
-#   group: docker
+version: 2
+listen: 127.0.0.1:8080
+read_only: true
+token_store: /etc/hostlens/secrets/tokens.json
+profile_dir: /etc/hostlens/profiles
+active_profiles: [host]
+docker_socket: ""
+observer_socket: /run/hostlens-observer/observer.sock
+repair_socket: /run/hostlens-repair/repair.sock
+# Set these numeric IDs to match the dedicated service accounts before starting.
+gateway_uid: 1001
+observer_uid: 1002
+repair_uid: 0
+shared_gid: 1001
+token_gid: 1002

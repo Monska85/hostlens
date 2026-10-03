@@ -43,7 +43,7 @@ case "${1:-help}" in
       --require-hashes --only-binary=:all: -r tools/dev/requirements.txt
     mkdir -p .tools/bin
     GOBIN="${repo}/.tools/bin" go -C tools/dev install github.com/rhysd/actionlint/cmd/actionlint mvdan.cc/sh/v3/cmd/shfmt
-    printf '%s\n' 'Dependencies ready. Prepare Docker images explicitly before test or test-matrix.'
+    printf '%s\n' 'Dependencies ready. Prepare disposable test images explicitly before validation.'
     ;;
   fmt)
     gofmt -w cmd internal tools
@@ -81,12 +81,8 @@ case "${1:-help}" in
       'prepare-live-docker        Pull pinned private Docker acceptance images' \
       'test-live-docker           Run the observer against a disposable nested engine' \
       'scan-vulnerabilities       Scan Go dependencies in a disposable container' \
-      'test-targets               List container matrix targets' \
-      'test-matrix                Run all cases or one target (Make TARGET= / Just argument)' \
-      'test-platforms             Run the distribution and architecture cases' \
       'systemd-image              Build the disposable lifecycle image' \
-      'test-systemd-restricted    Run restricted lifecycle acceptance' \
-      'test-systemd-standard      Run standard lifecycle acceptance'
+      'test-systemd              Run isolated systemd acceptance'
     ;;
   *)
     printf 'Unknown development command: %s\n' "${1}" >&2

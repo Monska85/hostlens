@@ -1,0 +1,7 @@
+allow:
+  - effect: observe
+    tool: list_services
+    resource: "*"
+  - effect: observe
+    tool: service_status
+    resource: "*"

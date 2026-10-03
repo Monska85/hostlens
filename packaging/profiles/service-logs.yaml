@@ -1,0 +1,4 @@
+allow:
+  - effect: observe
+    tool: service_logs
+    resource: "*"

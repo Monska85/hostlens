@@ -1,0 +1,7 @@
+allow:
+  - effect: observe
+    tool: container_stats
+    resource: "*"
+  - effect: observe
+    tool: container_logs
+    resource: "*"
